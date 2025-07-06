@@ -1,14 +1,11 @@
-import os
-from dotenv import load_dotenv
-load_dotenv() # загружает переменные из .env файла
-
-TTELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 # =================================================================
-#          КОД BOT.PY - ФИНАЛЬНАЯ ИСПРАВЛЕННАЯ ВЕРСИЯ
+#          КОД BOT.PY - ФИНАЛЬНАЯ ВЕРСИЯ ДЛЯ ДЕПЛОЯ
 # =================================================================
 import datetime
 import json
 import re
+import os
+from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, ContextTypes, CallbackQueryHandler,
@@ -16,21 +13,23 @@ from telegram.ext import (
 )
 import database as db
 
-#
-# !!! ВАЖНО: Вставьте сюда свой настоящий токен от BotFather !!!
-#
+# --- ЗАГРУЗКА СЕКРЕТНЫХ ДАННЫХ ---
+# Эта строка ищет файл .env и загружает из него переменные.
+# Это нужно для удобной работы на вашем локальном компьютере.
+load_dotenv()
+
+# Эта строка читает токен. На вашем компьютере она возьмет его из файла .env.
+# На сервере Render она возьмет его из "Environment Variables", которые мы настроили.
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 
-# !!! ВАЖНО: Вставьте сюда ID администратора (или нескольких через запятую) !!!
-# Чтобы узнать свой ID, напишите боту @userinfobot
-ADMIN_IDS = [384630608] 
+# --- ГЛОБАЛЬНЫЕ НАСТРОЙКИ ---
+ADMIN_IDS = [384630608] # !!! ЗАМЕНИТЕ НА СВОЙ ID АДМИНИСТРАТОРА !!!
 DAILY_BREAK_LIMIT_SECONDS = 3600
 MIN_WORK_SECONDS = 8 * 3600
 
 # Состояния для диалогов
-(
-    GET_DATES_TEXT, GET_REPORT_DATES
-) = range(2)
+GET_DATES_TEXT, GET_REPORT_DATES = range(2)
 
 absence_type_map = {
     'absence_sick': 'Больничный',
@@ -120,8 +119,6 @@ async def get_debt_menu(user_id):
     total_debt_seconds = db.get_total_debt(user_id)
     debt_str = seconds_to_str(total_debt_seconds)
     text = "У вас нет задолженностей по отработке. Отлично!"
-    today_str = str(datetime.date.today())
-    is_remote_day = db.get_approved_request(user_id, 'Удаленная работа', today_str)
     keyboard = [[InlineKeyboardButton("« Назад", callback_data='back_to_main_menu')]]
     if total_debt_seconds > 0:
         text = f"Ваша задолженность: **{debt_str}**."
@@ -193,7 +190,7 @@ async def process_dates_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
             if manager_2 and manager_2 != manager_1:
                 msg2 = await context.bot.send_message(manager_2, text_for_manager)
                 msg_id_2 = msg2.message_id
-            request_id = db.create_request(user.id, 'Удаленная работа', {'date': str(start_date)}, msg_id_1, msg_id_2)
+            request_id = db.create_request(user.id, 'remote_work', {'date': str(start_date)}, msg_id_1, msg_id_2)
             keyboard = [[InlineKeyboardButton("✅ Одобрить", callback_data=f'approve_{request_id}'), InlineKeyboardButton("❌ Отклонить", callback_data=f'deny_{request_id}')]]
             if msg_id_1: await context.bot.edit_message_reply_markup(chat_id=manager_1, message_id=msg_id_1, reply_markup=InlineKeyboardMarkup(keyboard))
             if msg_id_2: await context.bot.edit_message_reply_markup(chat_id=manager_2, message_id=msg_id_2, reply_markup=InlineKeyboardMarkup(keyboard))
@@ -209,7 +206,7 @@ async def process_dates_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return ConversationHandler.END
     except (ValueError, TypeError):
         await update.message.reply_text("Неверный формат даты. Попробуйте еще раз или введите /cancel для отмены.")
-        return GET_DATES_TEXT
+        return GET_ABSENCE_DATES
 async def ask_for_report_dates(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
@@ -232,9 +229,12 @@ async def process_report_dates(update: Update, context: ContextTypes.DEFAULT_TYP
         
         if user_info and user_info['role'] in ['manager', 'admin']:
             await send_manager_report(user_id, context, start_date, end_date)
-            await update.message.reply_text("Меню руководителя:", reply_markup=get_manager_menu())
         else:
             await send_employee_report(user_id, context, start_date, end_date)
+        
+        if user_info and user_info['role'] in ['manager', 'admin']:
+            await update.message.reply_text("Меню руководителя:", reply_markup=get_manager_menu())
+        else:
             await update.message.reply_text("Выберите действие:", reply_markup=await get_main_menu(user_id))
 
         return ConversationHandler.END
@@ -339,6 +339,7 @@ async def show_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     keyboard = [[InlineKeyboardButton(f"{user['full_name']} ({user['role']})", callback_data=f"user_details_{user['user_id']}")] for user in all_users]
     await update.message.reply_text("Список пользователей:", reply_markup=InlineKeyboardMarkup(keyboard))
 async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Обработчик команды /report."""
     user_info = db.get_user(update.effective_user.id)
     is_manager = user_info and user_info['role'] in ['manager', 'admin']
     await update.message.reply_text("Выберите период для отчета:", reply_markup=get_report_period_menu(is_manager=is_manager))
@@ -350,12 +351,14 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
     query = update.callback_query
     user_id = query.from_user.id
     command = query.data
-    await query.answer()
-
+    
+    # Загружаем данные о пользователе и его сессии ОДИН РАЗ в начале
     session_state = db.get_session_state(user_id)
     user_info = db.get_user(user_id)
     is_manager = user_info and user_info['role'] in ['manager', 'admin']
     
+    await query.answer()
+
     if command == 'show_status':
         status_text = "Вы не в активной сессии."
         if session_state:
@@ -375,9 +378,6 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
                 total_debt = db.get_total_debt(user_id)
                 status_text = f"Статус: Отработка\nТекущий долг: {seconds_to_str(total_debt)}"
         await query.answer(text=status_text, show_alert=True)
-    elif command == 'show_time_bank':
-        banked_seconds = user_info.get('time_bank_seconds', 0)
-        await query.answer(f"В вашем банке времени накоплено: {seconds_to_str(banked_seconds)}", show_alert=True)
     elif command.startswith('approve_') or command.startswith('deny_'):
         if not (is_admin or is_manager):
             await context.bot.send_message(user_id, "У вас нет прав для этого действия.")
