@@ -1,11 +1,9 @@
 # =================================================================
-#          КОД BOT.PY - ФИНАЛЬНАЯ ИСПРАВЛЕННАЯ ВЕРСИЯ
+#          ФИНАЛЬНЫЙ КОД BOT.PY
 # =================================================================
 import datetime
 import json
 import re
-import os
-from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, ContextTypes, CallbackQueryHandler,
@@ -13,12 +11,14 @@ from telegram.ext import (
 )
 import database as db
 
-# --- ЗАГРУЗКА СЕКРЕТНЫХ ДАННЫХ ---
-load_dotenv()
-TELEGRAM_BOT_TOKEN = os.getenv("7439821992:AAEmHwMgb69Q_eSDjvi3J7RzM0oMjrCZsxE")
+#
+# !!! ВАЖНО: Вставьте сюда свой настоящий токен от BotFather !!!
+#
+TELEGRAM_BOT_TOKEN = '7439821992:AAEmHwMgb69Q_eSDjvi3J7RzM0oMjrCZsxE'
 
-# --- ГЛОБАЛЬНЫЕ НАСТРОЙКИ ---
-ADMIN_IDS = [384630608] # !!! ЗАМЕНИТЕ НА СВОЙ ID АДМИНИСТРАТОРА !!!
+# !!! ВАЖНО: Вставьте сюда ID администратора (или нескольких через запятую) !!!
+# Чтобы узнать свой ID, напишите боту @userinfobot
+ADMIN_IDS = [384630608] 
 DAILY_BREAK_LIMIT_SECONDS = 3600
 MIN_WORK_SECONDS = 8 * 3600
 
@@ -126,15 +126,28 @@ def get_debt_working_menu(total_debt_seconds):
     text = f"Идет отработка. Текущий долг: {debt_str}"
     keyboard = [[InlineKeyboardButton("Закончить отработку", callback_data='end_debt_work')]]
     return text, InlineKeyboardMarkup(keyboard)
+
 def get_absence_menu():
     keyboard = [[InlineKeyboardButton("💻 Удаленная работа (запрос)", callback_data='request_remote_work')], [InlineKeyboardButton("🙋‍♂️ Попросить отгул", callback_data='request_day_off')], [InlineKeyboardButton("🤧 Больничный", callback_data='absence_sick')], [InlineKeyboardButton("🌴 Отпуск", callback_data='absence_vacation')], [InlineKeyboardButton("✈️ Командировка", callback_data='absence_trip')], [InlineKeyboardButton("« Назад", callback_data='back_to_main_menu')]]
     return InlineKeyboardMarkup(keyboard)
+
 def get_working_menu():
-    keyboard = [[InlineKeyboardButton("🌙 Закончить рабочий день", callback_data='end_work')], [InlineKeyboardButton("☕ Уйти на перерыв", callback_data='start_break_choice')], [InlineKeyboardButton("🏦 Банк времени", callback_data='show_time_bank')], [InlineKeyboardButton("📊 Запросить отчет", callback_data='request_report'), InlineKeyboardButton("⏱️ Мое время", callback_data='show_status')]]
+    keyboard = [
+        [InlineKeyboardButton("🌙 Закончить рабочий день", callback_data='end_work')], 
+        [InlineKeyboardButton("☕ Уйти на перерыв", callback_data='start_break_choice')],
+        [InlineKeyboardButton("🏦 Банк времени", callback_data='show_time_bank')],
+        [InlineKeyboardButton("📊 Запросить отчет", callback_data='request_report'), InlineKeyboardButton("⏱️ Мое время", callback_data='show_status')]
+    ]
     return InlineKeyboardMarkup(keyboard)
+
 def get_break_menu():
-    keyboard = [[InlineKeyboardButton("▶️ Вернуться с перерыва", callback_data='end_break')], [InlineKeyboardButton("🏦 Банк времени", callback_data='show_time_bank')], [InlineKeyboardButton("📊 Запросить отчет", callback_data='request_report'), InlineKeyboardButton("⏱️ Мое время", callback_data='show_status')]]
+    keyboard = [
+        [InlineKeyboardButton("▶️ Вернуться с перерыва", callback_data='end_break')],
+        [InlineKeyboardButton("🏦 Банк времени", callback_data='show_time_bank')],
+        [InlineKeyboardButton("📊 Запросить отчет", callback_data='request_report'), InlineKeyboardButton("⏱️ Мое время", callback_data='show_status')]
+    ]
     return InlineKeyboardMarkup(keyboard)
+
 def get_early_leave_menu():
     keyboard = [
         [InlineKeyboardButton("Использовать банк времени", callback_data='end_work_use_bank')],
@@ -155,7 +168,6 @@ async def ask_for_dates_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
         prompt_text = f"Введите дату для '{absence_name}', например: 15.08.2025"
     await query.edit_message_text(f"{prompt_text}\n\nДля отмены введите /cancel")
     return GET_DATES_TEXT
-
 async def process_dates_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user = update.effective_user
     user_input = update.message.text
@@ -173,7 +185,6 @@ async def process_dates_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
         start_date = min(parsed_dates)
         end_date = max(parsed_dates) if len(parsed_dates) > 1 else start_date
         user_info = db.get_user(user.id)
-        # Для запросов на согласование
         if absence_type_key == 'request_remote_work':
             if not user_info or (not user_info.get('manager_id_1') and not user_info.get('manager_id_2')):
                 await update.message.reply_text("Ошибка: за вами не закреплен руководитель.", reply_markup=await get_main_menu(user.id))
@@ -188,12 +199,11 @@ async def process_dates_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
             if manager_2 and manager_2 != manager_1:
                 msg2 = await context.bot.send_message(manager_2, text_for_manager)
                 msg_id_2 = msg2.message_id
-            request_id = db.create_request(user.id, 'remote_work', {'date': str(start_date)}, msg_id_1, msg_id_2)
+            request_id = db.create_request(user.id, 'Удаленная работа', {'date': str(start_date)}, msg_id_1, msg_id_2)
             keyboard = [[InlineKeyboardButton("✅ Одобрить", callback_data=f'approve_{request_id}'), InlineKeyboardButton("❌ Отклонить", callback_data=f'deny_{request_id}')]]
             if msg_id_1: await context.bot.edit_message_reply_markup(chat_id=manager_1, message_id=msg_id_1, reply_markup=InlineKeyboardMarkup(keyboard))
             if msg_id_2: await context.bot.edit_message_reply_markup(chat_id=manager_2, message_id=msg_id_2, reply_markup=InlineKeyboardMarkup(keyboard))
             await update.message.reply_text(f"Ваш запрос на '{absence_name}' отправлен.", reply_markup=await get_main_menu(user.id))
-        # Для обычных уведомлений
         else:
             db.add_absence(user.id, absence_name, str(start_date), str(end_date))
             await update.message.reply_text(f"{absence_name} с {start_date.strftime('%d.%m.%Y')} по {end_date.strftime('%d.%m.%Y')} успешно зарегистрирован.", reply_markup=await get_main_menu(user.id))
@@ -205,7 +215,7 @@ async def process_dates_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return ConversationHandler.END
     except (ValueError, TypeError):
         await update.message.reply_text("Неверный формат даты. Попробуйте еще раз или введите /cancel для отмены.")
-        return GET_ABSENCE_DATES
+        return GET_DATES_TEXT
 async def ask_for_report_dates(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
@@ -375,9 +385,11 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
                 total_debt = db.get_total_debt(user_id)
                 status_text = f"Статус: Отработка\nТекущий долг: {seconds_to_str(total_debt)}"
         await query.answer(text=status_text, show_alert=True)
-    
+    elif command == 'show_time_bank':
+        banked_seconds = user_info.get('time_bank_seconds', 0) if user_info else 0
+        await query.answer(f"В вашем банке времени накоплено: {seconds_to_str(banked_seconds)}", show_alert=True)
     elif command.startswith('approve_') or command.startswith('deny_'):
-        if not (is_admin or is_manager):
+        if not (is_manager or user_id in ADMIN_IDS):
             await context.bot.send_message(user_id, "У вас нет прав для этого действия.")
             return
         action, request_id_str = command.split('_')
@@ -405,26 +417,22 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             await end_workday_logic(requester_info['user_id'], context, is_early_leave=True)
         else:
             await context.bot.send_message(requester_info['user_id'], text_to_employee)
-    
     elif command.startswith('user_details_'):
         target_user_id = int(command.split('_')[-1])
         info = db.get_user(target_user_id)
         text = f"Инфо:\nИмя: {info['full_name']}\nID: {info['user_id']}\nРоль: {info['role']}\nID Рук. 1: {info.get('manager_id_1', 'Н/Н')}\nID Рук. 2: {info.get('manager_id_2', 'Н/Н')}"
         keyboard = [[InlineKeyboardButton(f"❌ Удалить {info['full_name']}", callback_data=f"delete_user_{target_user_id}")], [InlineKeyboardButton("« Назад к списку", callback_data="show_all_users")]]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
-    
     elif command == "show_all_users":
         all_users = db.get_all_users()
         keyboard = [[InlineKeyboardButton(f"{u['full_name']} ({u['role']})", callback_data=f"user_details_{u['user_id']}")] for u in all_users]
         await query.edit_message_text("Список пользователей:", reply_markup=InlineKeyboardMarkup(keyboard))
-    
     elif command.startswith('delete_user_'):
         target_user_id = int(command.split('_')[-1])
         info = db.get_user(target_user_id)
         text = f"Вы уверены, что хотите удалить пользователя {info['full_name']}? Это действие необратимо."
         keyboard = [[InlineKeyboardButton("ДА, УДАЛИТЬ", callback_data=f"confirm_delete_{target_user_id}")], [InlineKeyboardButton("Отмена", callback_data=f"user_details_{target_user_id}")]]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
-    
     elif command.startswith('confirm_delete_'):
         target_user_id = int(command.split('_')[-1])
         db.delete_user(target_user_id)
@@ -432,16 +440,12 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         all_users = db.get_all_users()
         keyboard = [[InlineKeyboardButton(f"{u['full_name']} ({u['role']})", callback_data=f"user_details_{u['user_id']}")] for u in all_users]
         await context.bot.send_message(user_id, "Обновленный список пользователей:", reply_markup=InlineKeyboardMarkup(keyboard))
-    
     elif command == 'absence_menu':
         await query.edit_message_text("Выберите тип отсутствия:", reply_markup=get_absence_menu())
-    
     elif command == 'back_to_main_menu':
         await query.edit_message_text("Выберите действие:", reply_markup=await get_main_menu(user_id))
-    
     elif command == 'manager_report_button':
         await query.edit_message_text("Выберите период для отчета по команде:", reply_markup=get_report_period_menu(is_manager=True))
-    
     elif command == 'report_today':
         today = datetime.date.today()
         await query.delete_message()
@@ -449,7 +453,6 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             await send_manager_report(user_id, context, today, today)
         else:
             await send_employee_report(user_id, context, today, today)
-    
     elif command == 'report_this_month':
         today = datetime.date.today()
         first_day = today.replace(day=1)
@@ -460,10 +463,8 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             await send_manager_report(user_id, context, first_day, last_day)
         else:
             await send_employee_report(user_id, context, first_day, last_day)
-    
     elif command == 'back_to_manager_menu':
         await query.edit_message_text("Меню руководителя:", reply_markup=get_manager_menu())
-    
     elif command == 'request_day_off':
         if not user_info or (not user_info.get('manager_id_1') and not user_info.get('manager_id_2')):
             await context.bot.send_message(user_id, "Ошибка: за вами не закреплен руководитель.")
@@ -482,10 +483,8 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         if msg_id_1: await context.bot.edit_message_reply_markup(chat_id=manager_1, message_id=msg_id_1, reply_markup=InlineKeyboardMarkup(keyboard))
         if msg_id_2: await context.bot.edit_message_reply_markup(chat_id=manager_2, message_id=msg_id_2, reply_markup=InlineKeyboardMarkup(keyboard))
         await query.edit_message_text("Ваш запрос на отгул отправлен руководителю.", reply_markup=await get_main_menu(user_id))
-    
     elif command == 'request_report':
         await query.edit_message_text("Выберите период для отчета:", reply_markup=get_report_period_menu(is_manager=False))
-    
     elif command == 'end_work':
         if not session_state: return
         work_duration_with_breaks = (datetime.datetime.now() - session_state['start_time']).total_seconds()
@@ -494,7 +493,6 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         else:
             await query.edit_message_text("Завершение рабочего дня...")
             await end_workday_logic(user_id, context, is_early_leave=False)
-    
     elif command == 'end_work_use_bank':
         work_duration = (datetime.datetime.now() - session_state['start_time']).total_seconds() - session_state.get('total_break_seconds', 0)
         shortfall_seconds = MIN_WORK_SECONDS - work_duration
@@ -506,7 +504,6 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         else:
             needed_str = seconds_to_str(shortfall_seconds - banked_seconds)
             await query.edit_message_text(f"Недостаточно времени в банке. Нужно отработать еще: {needed_str}", reply_markup=get_early_leave_menu())
-    
     elif command == 'end_work_ask_manager':
         await query.edit_message_text("Отправляем запрос на согласование руководителю...")
         manager_1, manager_2 = user_info.get('manager_id_1'), user_info.get('manager_id_2')
@@ -525,11 +522,9 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         keyboard = [[InlineKeyboardButton("✅ Одобрить", callback_data=f'approve_{request_id}'), InlineKeyboardButton("❌ Отклонить", callback_data=f'deny_{request_id}')]]
         if msg_id_1: await context.bot.edit_message_reply_markup(chat_id=manager_1, message_id=msg_id_1, reply_markup=InlineKeyboardMarkup(keyboard))
         if msg_id_2: await context.bot.edit_message_reply_markup(chat_id=manager_2, message_id=msg_id_2, reply_markup=InlineKeyboardMarkup(keyboard))
-    
     elif command == 'debt_menu':
         text, markup = await get_debt_menu(user_id)
         await query.edit_message_text(text, reply_markup=markup, parse_mode='Markdown')
-    
     elif command == 'start_debt_work':
         session_state = db.get_session_state(user_id) or {}
         session_state['status'] = 'clearing_debt'
@@ -538,7 +533,6 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         total_debt = db.get_total_debt(user_id)
         text, markup = get_debt_working_menu(total_debt)
         await query.edit_message_text(text, reply_markup=markup)
-    
     elif command == 'end_debt_work':
         if not session_state or session_state.get('status') != 'clearing_debt': return
         total_debt_before = db.get_total_debt(user_id)
@@ -557,7 +551,6 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         await query.edit_message_text(f"Зачтено в счет отработки: {cleared_str} из {initial_debt_str}.")
         text, markup = await get_debt_menu(user_id)
         await context.bot.send_message(user_id, text, reply_markup=markup, parse_mode='Markdown')
-    
     elif command == 'start_work_office' or command == 'start_work_remote':
         if session_state:
             await query.edit_message_text(text="Вы не можете начать новый день, пока не завершите текущую сессию.", reply_markup=get_working_menu())
@@ -567,7 +560,6 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         db.set_session_state(user_id, new_state)
         start_time_str = new_state['start_time'].strftime("%H:%M:%S")
         await query.edit_message_text(text=f"Рабочий день начат в {start_time_str}.", reply_markup=get_working_menu())
-    
     elif command == 'start_break_choice':
         if not session_state: return
         used_break_seconds = session_state.get('total_break_seconds', 0)
@@ -580,7 +572,6 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         db.set_session_state(user_id, session_state)
         remaining_time_str = seconds_to_str(remaining_break_seconds)
         await query.edit_message_text(text=f"У вас осталось {remaining_time_str} перерыва. Хорошего отдыха!", reply_markup=get_break_menu())
-    
     elif command == 'end_break':
         if not session_state or session_state.get('status') != 'on_break': return
         break_duration = (datetime.datetime.now() - session_state['break_start_time']).total_seconds()
@@ -590,7 +581,6 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         db.set_session_state(user_id, session_state)
         remaining_break_time_str = seconds_to_str(DAILY_BREAK_LIMIT_SECONDS - total_break_seconds)
         await query.edit_message_text(text=f"Вы вернулись к работе. У вас осталось {remaining_break_time_str} перерыва.", reply_markup=get_working_menu())
-    
     elif command == 'back_to_working_menu':
         await query.edit_message_text(text="Вы работаете.", reply_markup=get_working_menu())
 
@@ -618,7 +608,6 @@ def main() -> None:
         states={GET_REPORT_DATES: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_report_dates)]},
         fallbacks=[CommandHandler('cancel', cancel_conversation)],
     )
-
     application.add_handler(absence_conv_handler)
     application.add_handler(report_conv_handler)
     
