@@ -15,7 +15,7 @@ import database as db
 
 # --- ЗАГРУЗКА СЕКРЕТНЫХ ДАННЫХ ---
 load_dotenv()
-TELEGRAM_BOT_TOKEN = os.getenv("7439821992:AAFl9-sBqA580zrCJB1ooMYFPQi7vs2JbMk")
+TELEGRAM_BOT_TOKEN = os.getenv("7439821992:AAEmHwMgb69Q_eSDjvi3J7RzM0oMjrCZsxE")
 
 # --- ГЛОБАЛЬНЫЕ НАСТРОЙКИ ---
 ADMIN_IDS = [384630608] # !!! ЗАМЕНИТЕ НА СВОЙ ID АДМИНИСТРАТОРА !!!
