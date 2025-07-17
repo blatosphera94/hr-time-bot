@@ -555,11 +555,262 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
     user_id = query.from_user.id
     command = query.data
     
+    # Сначала обрабатываем команды, которые должны ответить всплывающим окном и завершиться
+    if command == 'show_status':
+        session_state = db.get_session_state(user_id)
+        status_text = "Вы не в активной сессии."
+        if session_state and session_state.get('status'):
+            status = session_state.get('status')
+            if status == 'working':
+                work_duration_seconds = (get_now() - session_state['start_time']).total_seconds()
+                work_duration_str = seconds_to_str(work_duration_seconds)
+                total_break_seconds = session_state.get('total_break_seconds', 0)
+                remaining_break_str = seconds_to_str(DAILY_BREAK_LIMIT_SECONDS - total_break_seconds)
+                status_text = f"Статус: Работаете\nОтработано сегодня: {work_duration_str}\nОсталось перерыва: {remaining_break_str}"
+            elif status == 'on_break':
+                break_start_time = session_state.get('break_start_time')
+                elapsed_break = seconds_to_str((get_now() - break_start_time).total_seconds())
+                status_text = f"Статус: На перерыве\nДлительность: {elapsed_break}"
+            elif status in ['clearing_debt', 'banking_time']:
+                start_time = session_state.get('start_time')
+                elapsed_extra = seconds_to_str((get_now() - start_time).total_seconds())
+                work_type_text = "Отработка долга" if status == 'clearing_debt' else "Работа в банк времени"
+                status_text = f"Статус: {work_type_text}\nПрошло времени: {elapsed_extra}"
+        await query.answer(text=status_text, show_alert=True)
+        return
+        
+    if command == 'show_time_bank':
+        user_info = db.get_user(user_id)
+        banked_seconds = user_info.get('time_bank_seconds', 0) if user_info else 0
+        await query.answer(f"🏦 В вашем банке времени накоплено: {seconds_to_str(banked_seconds)}", show_alert=True)
+        return
+
+    # Для всех остальных кнопок отвечаем сразу, чтобы убрать часики
+    await query.answer()
+
     session_state = db.get_session_state(user_id)
     user_info = db.get_user(user_id)
     is_manager = user_info and user_info['role'] in ['manager', 'admin']
     
-    # ... (код обработчика кнопок) ...
+    # --- Логика для всех остальных кнопок ---
+    if command.startswith(('approve_', 'deny_', 'approve_no_debt_', 'ack_request_')):
+        if not (is_manager or user_id in ADMIN_IDS): return
+        parts = command.split('_')
+        action = "_".join(parts[:-1])
+        request_id = int(parts[-1])
+        
+        request_info = db.get_request(request_id)
+        if not request_info or request_info['status'] != 'pending':
+            await query.edit_message_text("Запрос уже был обработан.")
+            return
+
+        requester_info = db.get_user(request_info['requester_id'])
+        if not requester_info:
+            await query.edit_message_text("Не удалось найти сотрудника.")
+            return
+
+        if action == 'ack_request':
+            db.update_request_status(request_id, 'acknowledged')
+            await query.edit_message_text(f"✅ Принято (уведомление от {requester_info['full_name']}).")
+        else:
+            new_status = 'approved' if action.startswith('approve') else 'denied'
+            db.update_request_status(request_id, new_status)
+            
+            response_text = f"Вы {'одобрили' if new_status == 'approved' else 'отклонили'} запрос от {requester_info['full_name']}"
+            if action == 'approve_no_debt': response_text += " (без отработки)."
+            await query.edit_message_text(response_text)
+            
+            text_to_employee = f"Ваш запрос ('{request_info.get('request_type', 'Неизвестно')}') был {'одобрен' if new_status == 'approved' else 'отклонен'}."
+            if action == 'approve_no_debt': text_to_employee += " (без начисления отработки)."
+            
+            employee_reply_markup = None
+            if request_info['request_type'] == 'early_leave':
+                if new_status == 'approved':
+                    forgive_debt = (action == 'approve_no_debt')
+                    await end_workday_logic(update, context, requester_info['user_id'], is_early_leave=True, forgive_debt=forgive_debt)
+                else: 
+                    employee_reply_markup = get_working_menu()
+            
+            await context.bot.send_message(requester_info['user_id'], text_to_employee, reply_markup=employee_reply_markup)
+
+    elif command == 'help_button':
+        await help_command(update, context)
+        
+    elif command.startswith('user_details_'):
+        if not is_manager: return
+        target_user_id = int(command.split('_')[-1])
+        info = db.get_user(target_user_id)
+        text = f"Инфо:\nИмя: {info['full_name']}\nID: {info['user_id']}\nРоль: {info['role']}\nБанк времени: {seconds_to_str(info.get('time_bank_seconds',0))}\nID Рук. 1: {info.get('manager_id_1', 'Н/Д')}\nID Рук. 2: {info.get('manager_id_2', 'Н/Д')}"
+        keyboard = [[InlineKeyboardButton(f"❌ Удалить {info['full_name']}", callback_data=f"delete_user_{target_user_id}")], [InlineKeyboardButton("« Назад к списку", callback_data="show_all_users")]]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+    elif command == "show_all_users":
+        if not is_manager: return
+        all_users = db.get_all_users()
+        keyboard = [[InlineKeyboardButton(f"{u['full_name']} ({u['role']})", callback_data=f"user_details_{u['user_id']}")] for u in all_users]
+        await query.edit_message_text("Список пользователей:", reply_markup=InlineKeyboardMarkup(keyboard))
+    
+    elif command.startswith('delete_user_'):
+        if not is_manager: return
+        target_user_id = int(command.split('_')[-1])
+        info = db.get_user(target_user_id)
+        text = f"Вы уверены, что хотите удалить пользователя {info['full_name']}? Это действие необратимо."
+        keyboard = [[InlineKeyboardButton("ДА, УДАЛИТЬ", callback_data=f"confirm_delete_{target_user_id}")], [InlineKeyboardButton("Отмена", callback_data=f"user_details_{target_user_id}")]]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+    elif command.startswith('confirm_delete_'):
+        if not is_manager: return
+        target_user_id = int(command.split('_')[-1])
+        info = db.get_user(target_user_id)
+        db.delete_user(target_user_id)
+        await query.edit_message_text(f"Пользователь {info['full_name']} удален.")
+        
+    elif command == 'absence_menu':
+        await query.edit_message_text("Выберите тип отсутствия:", reply_markup=get_absence_menu())
+        
+    elif command == 'back_to_main_menu':
+        await query.edit_message_text("Выберите действие:", reply_markup=await get_main_menu(update, context, user_id))
+    elif command == 'back_to_working_menu':
+        await query.edit_message_text("Вы работаете.", reply_markup=get_working_menu())
+    elif command == 'back_to_manager_menu':
+        await query.edit_message_text("Меню руководителя:", reply_markup=get_manager_menu())
+    
+    elif command.startswith('start_work'):
+        if session_state:
+            await query.edit_message_text(text="Вы не можете начать новый день, пока не завершите текущую сессию.", reply_markup=get_working_menu())
+        else:
+            is_remote = (command == 'start_work_remote')
+            new_state = {'status': 'working', 'start_time': get_now(), 'total_break_seconds': 0, 'is_remote': is_remote}
+            db.set_session_state(user_id, new_state)
+            await query.edit_message_text(text=f"Рабочий день начат в {get_now().strftime('%H:%M:%S')}.", reply_markup=get_working_menu())
+            
+    elif command == 'end_work':
+        if not session_state: return
+        work_duration = (get_now() - session_state['start_time']).total_seconds()
+        if work_duration < MIN_WORK_SECONDS:
+            await query.edit_message_text("Вы хотите уйти раньше. Как поступим?", reply_markup=get_early_leave_menu())
+        else:
+            await query.edit_message_text("Завершение рабочего дня...")
+            await end_workday_logic(update, context, user_id)
+            
+    elif command == 'start_break_choice':
+        if not session_state: return
+        remaining_break_seconds = DAILY_BREAK_LIMIT_SECONDS - session_state.get('total_break_seconds', 0)
+        if remaining_break_seconds <= 0:
+            await context.bot.send_message(user_id, "У вас не осталось времени на перерыв.")
+            return
+        session_state['status'] = 'on_break'
+        session_state['break_start_time'] = get_now()
+        db.set_session_state(user_id, session_state)
+        await query.edit_message_text(text=f"У вас осталось {seconds_to_str(remaining_break_seconds)} перерыва. Хорошего отдыха!", reply_markup=get_break_menu())
+        
+    elif command == 'end_break':
+        if not session_state or session_state.get('status') != 'on_break': return
+        break_duration = (get_now() - session_state['break_start_time']).total_seconds()
+        session_state['total_break_seconds'] = session_state.get('total_break_seconds', 0) + int(break_duration)
+        session_state['status'] = 'working'
+        del session_state['break_start_time']
+        db.set_session_state(user_id, session_state)
+        remaining_break_time_str = seconds_to_str(DAILY_BREAK_LIMIT_SECONDS - session_state['total_break_seconds'])
+        await query.edit_message_text(text=f"Вы вернулись к работе. У вас осталось {remaining_break_time_str} перерыва.", reply_markup=get_working_menu())
+    
+    elif command == 'additional_work_menu':
+        await query.edit_message_text("Выберите тип дополнительной работы:", reply_markup=get_additional_work_menu(user_id))
+    
+    elif command == 'start_debt_work' or command == 'start_banking_work':
+        status = 'clearing_debt' if command == 'start_debt_work' else 'banking_time'
+        start_time = get_now()
+        db.set_session_state(user_id, {'status': status, 'start_time': start_time})
+        text, markup = get_extra_work_active_menu(status, start_time)
+        await query.edit_message_text(text, reply_markup=markup)
+        if status == 'banking_time':
+            if not user_info or (not user_info.get('manager_id_1') and not user_info.get('manager_id_2')): return
+            text_for_manager = f"Сотрудник {user_info['full_name']} начал работать в банк времени."
+            request_id = db.create_request(user_id, 'banking_work', {})
+            keyboard = [[InlineKeyboardButton("✅ Принято", callback_data=f'ack_request_{request_id}')]]
+            msg_id_1, msg_id_2 = None, None
+            if user_info.get('manager_id_1'):
+                msg1 = await context.bot.send_message(user_info['manager_id_1'], text_for_manager, reply_markup=InlineKeyboardMarkup(keyboard))
+                msg_id_1 = msg1.message_id
+            if user_info.get('manager_id_2') and user_info.get('manager_id_2') != user_info.get('manager_id_1'):
+                msg2 = await context.bot.send_message(user_info['manager_id_2'], text_for_manager, reply_markup=InlineKeyboardMarkup(keyboard))
+                msg_id_2 = msg2.message_id
+            db.update_request_messages(request_id, msg_id_1, msg_id_2)
+
+    elif command == 'end_debt_work' or command == 'end_banking_work':
+        if not session_state: return
+        start_time = session_state['start_time']
+        worked_seconds = (get_now() - start_time).total_seconds()
+        worked_time_str = seconds_to_str(worked_seconds)
+        if command == 'end_debt_work':
+            db.clear_work_debt(user_id, int(worked_seconds))
+            db.add_debt_log(user_id, str(start_time), str(get_now()), int(worked_seconds))
+            await query.edit_message_text(f"Зачтено в счет отработки: {worked_time_str}.", reply_markup=await get_main_menu(update, context, user_id))
+        else:
+            db.update_time_bank(user_id, int(worked_seconds))
+            db.add_work_log(user_id, str(start_time), str(get_now()), int(worked_seconds), 0, 'banking')
+            await query.edit_message_text(f"Работа в банк времени завершена. Вы накопили: {worked_time_str}.", reply_markup=await get_main_menu(update, context, user_id))
+        db.delete_session_state(user_id)
+        
+    elif command == 'end_work_ask_manager':
+        manager_1, manager_2 = user_info.get('manager_id_1'), user_info.get('manager_id_2')
+        if not manager_1 and not manager_2:
+            await query.edit_message_text("Ошибка: за вами не закреплен руководитель.", reply_markup=get_working_menu())
+            return
+        await query.edit_message_text("Отправляем запрос на согласование руководителю...")
+        request_id = db.create_request(user_id, 'early_leave', {})
+        keyboard = [
+            [InlineKeyboardButton("✅ Одобрить", callback_data=f'approve_{request_id}'), InlineKeyboardButton("❌ Отклонить", callback_data=f'deny_{request_id}')],
+            [InlineKeyboardButton("🎉 Одобрить без отработки", callback_data=f'approve_no_debt_{request_id}')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        msg_id_1, msg_id_2 = None, None
+        if manager_1:
+            msg1 = await context.bot.send_message(manager_1, f"Сотрудник {user_info['full_name']} запрашивает раннее завершение рабочего дня.", reply_markup=reply_markup)
+            msg_id_1 = msg1.message_id
+        if manager_2 and manager_2 != manager_1:
+            msg2 = await context.bot.send_message(manager_2, f"Сотрудник {user_info['full_name']} запрашивает раннее завершение рабочего дня.", reply_markup=reply_markup)
+            msg_id_2 = msg2.message_id
+        db.update_request_messages(request_id, msg_id_1, msg_id_2)
+
+    elif command == 'end_work_use_bank':
+        work_duration = (get_now() - session_state['start_time']).total_seconds() - session_state.get('total_break_seconds', 0)
+        shortfall_seconds = MIN_WORK_SECONDS - work_duration
+        banked_seconds = user_info.get('time_bank_seconds', 0)
+        if banked_seconds >= shortfall_seconds:
+            db.update_time_bank(user_id, -int(shortfall_seconds))
+            await query.edit_message_text("Завершение рабочего дня за счет банка времени...")
+            await end_workday_logic(update, context, user_id, is_early_leave=True, used_bank_time=shortfall_seconds)
+        else:
+            needed_str = seconds_to_str(shortfall_seconds - banked_seconds)
+            await query.edit_message_text(f"Недостаточно времени в банке. Нужно отработать еще: {needed_str}", reply_markup=get_early_leave_menu())
+            
+    elif command == 'request_report' or command == 'manager_report_button':
+        in_session = bool(session_state)
+        text = "Выберите период для отчета по команде:" if is_manager else "Выберите период для отчета:"
+        await query.edit_message_text(text, reply_markup=get_report_period_menu(is_manager, in_session))
+
+    elif command.startswith('report_today'):
+        report_type = command.split('_')[-1]
+        today = get_now().date()
+        await query.delete_message()
+        if report_type == 'manager': await send_manager_report(user_id, context, today, today)
+        else: await send_employee_report(user_id, context, today, today)
+            
+    elif command.startswith('report_this_month'):
+        report_type = command.split('_')[-1]
+        today = get_now().date()
+        first_day = today.replace(day=1)
+        last_day = (first_day.replace(day=28) + datetime.timedelta(days=4)).replace(day=1) - datetime.timedelta(days=1)
+        await query.delete_message()
+        if report_type == 'manager': await send_manager_report(user_id, context, first_day, last_day)
+        else: await send_employee_report(user_id, context, first_day, last_day)
+    
+    elif command == 'team_status_button':
+        await get_team_status_logic(user_id, context)
+
+    
+
 
 # --- Функция запуска бота ---
 def main() -> None:

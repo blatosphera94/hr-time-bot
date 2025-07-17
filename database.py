@@ -52,7 +52,6 @@ def init_db():
     conn.close()
 
 def get_absences_for_user(user_id, check_date):
-    """Возвращает отсутствия пользователя на конкретную дату."""
     conn = get_connection()
     with conn.cursor(cursor_factory=RealDictCursor) as cursor:
         cursor.execute(
@@ -64,11 +63,10 @@ def get_absences_for_user(user_id, check_date):
     return absences
 
 def get_todays_work_log_for_user(user_id):
-    """Проверяет, есть ли у пользователя завершенная сессия за сегодня."""
     conn = get_connection()
     local_tz = pytz.timezone(LOCAL_TZ_STR)
     today_start = datetime.datetime.now(local_tz).replace(hour=0, minute=0, second=0, microsecond=0)
-    
+
     with conn.cursor(cursor_factory=RealDictCursor) as cursor:
         cursor.execute("SELECT * FROM work_log WHERE user_id = %s AND start_time >= %s ORDER BY end_time DESC LIMIT 1", (user_id, today_start))
         log = cursor.fetchone()
@@ -136,7 +134,7 @@ def add_or_update_user(user_id, full_name, role='employee', manager_id_1=None, m
             """, (user_id, full_name, role, manager_id_1, manager_id_2, current_bank))
     conn.commit()
     conn.close()
-    
+
 def get_user(user_id):
     conn = get_connection()
     with conn.cursor(cursor_factory=RealDictCursor) as cursor:
@@ -152,7 +150,7 @@ def get_all_users():
         users = cursor.fetchall()
     conn.close()
     return users
-    
+
 def get_managed_users(manager_id):
     conn = get_connection()
     with conn.cursor(cursor_factory=RealDictCursor) as cursor:
@@ -196,7 +194,7 @@ def update_request_status(request_id, status):
         cursor.execute("UPDATE requests SET status = %s WHERE request_id = %s", (status, request_id))
     conn.commit()
     conn.close()
-    
+
 def add_work_log(user_id, start_time, end_time, total_work_seconds, total_break_seconds, work_type):
     conn = get_connection()
     with conn.cursor() as cursor:
@@ -239,7 +237,7 @@ def update_time_bank(user_id, seconds_to_add):
         cursor.execute("UPDATE users SET time_bank_seconds = time_bank_seconds + %s WHERE user_id = %s", (seconds_to_add, user_id))
     conn.commit()
     conn.close()
-    
+
 def clear_work_debt(user_id, seconds_to_clear):
     conn = get_connection()
     with conn.cursor(cursor_factory=RealDictCursor) as cursor:
@@ -273,7 +271,7 @@ def get_debt_logs_for_user(user_id, start_date, end_date):
         result = cursor.fetchone()
     conn.close()
     return result[0] if result and result[0] else 0
-    
+
 def add_absence(user_id, absence_type, start_date, end_date):
     conn = get_connection()
     with conn.cursor() as cursor:
