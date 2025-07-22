@@ -3,7 +3,7 @@ import re
 import datetime
 import logging
 from math import radians, sin, cos, sqrt, atan2
-from telegram import Update
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from telegram.ext import ContextTypes, ConversationHandler, MessageHandler, CallbackQueryHandler, filters, CommandHandler
 
 import database as db
