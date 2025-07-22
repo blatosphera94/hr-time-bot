@@ -12,7 +12,6 @@ logger = logging.getLogger(__name__)
 
 @contextmanager
 def db_connection():
-    """Контекстный менеджер для безопасных транзакций с базой данных."""
     conn = None
     try:
         conn = psycopg2.connect(CONFIG.DATABASE_URL)
@@ -26,7 +25,6 @@ def db_connection():
         if conn: conn.close()
 
 def init_db(drop_existing=False):
-    """Инициализирует базу данных, создавая таблицы, если их нет."""
     tables = ['users', 'work_sessions', 'requests', 'work_log', 'work_debt', 'debt_log', 'absences']
     with db_connection() as conn:
         with conn.cursor() as cursor:
@@ -38,21 +36,15 @@ def init_db(drop_existing=False):
             logger.info("Создание таблиц...")
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS users (
-                    user_id BIGINT PRIMARY KEY,
-                    full_name TEXT NOT NULL,
-                    role TEXT DEFAULT 'employee',
-                    manager_id_1 BIGINT,
-                    manager_id_2 BIGINT,
+                    user_id BIGINT PRIMARY KEY, full_name TEXT NOT NULL, role TEXT, 
+                    manager_id_1 BIGINT, manager_id_2 BIGINT, 
                     time_bank_seconds INTEGER DEFAULT 0,
-                    office_latitude REAL,
-                    office_longitude REAL,
-                    office_radius_meters INTEGER
+                    office_latitude REAL, office_longitude REAL, office_radius_meters INTEGER
                 )''')
             
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS work_sessions (
-                    user_id BIGINT PRIMARY KEY,
-                    state_json JSONB,
+                    user_id BIGINT PRIMARY KEY, state_json JSONB,
                     CONSTRAINT fk_user FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE
                 )''')
             
@@ -71,7 +63,7 @@ def init_db(drop_existing=False):
                     total_break_seconds INTEGER, work_type TEXT DEFAULT 'office',
                     CONSTRAINT fk_user FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE
                 )''')
-                
+            
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS work_debt (
                     debt_id SERIAL PRIMARY KEY, user_id BIGINT, debt_seconds INTEGER, 
@@ -94,32 +86,7 @@ def init_db(drop_existing=False):
                 )''')
     logger.info("База данных успешно инициализирована.")
 
-def add_or_update_user(user_id: int, full_name: str, role: str = 'employee', manager_id_1: int = None, manager_id_2: int = None):
-    """Добавляет нового или обновляет существующего пользователя, сохраняя его банк времени и настройки офиса."""
-    with db_connection() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT time_bank_seconds FROM users WHERE user_id = %s", (user_id,))
-            row = cursor.fetchone()
-            current_bank = row[0] if row else 0
-            
-            cursor.execute("""
-                INSERT INTO users (
-                    user_id, full_name, role, manager_id_1, manager_id_2, 
-                    time_bank_seconds, office_latitude, office_longitude, office_radius_meters
-                ) 
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) 
-                ON CONFLICT (user_id) DO UPDATE SET 
-                    full_name = EXCLUDED.full_name, 
-                    role = EXCLUDED.role, 
-                    manager_id_1 = EXcluded.manager_id_1, 
-                    manager_id_2 = EXCLUDED.manager_id_2;
-                """, (
-                    user_id, full_name, role, manager_id_1, manager_id_2, 
-                    current_bank, CONFIG.OFFICE_LATITUDE, CONFIG.OFFICE_LONGITUDE, CONFIG.OFFICE_RADIUS_METERS
-                ))
-
 def get_absences_for_user(user_id: int, check_date: datetime.date) -> List[Dict]:
-    """Получает список активных отсутствий пользователя на указанную дату."""
     with db_connection() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(
@@ -129,7 +96,6 @@ def get_absences_for_user(user_id: int, check_date: datetime.date) -> List[Dict]
             return cursor.fetchall()
 
 def get_todays_work_log_for_user(user_id: int) -> Optional[Dict]:
-    """Получает последний лог работы пользователя за сегодня."""
     today_start = datetime.datetime.now(LOCAL_TZ).replace(hour=0, minute=0, second=0, microsecond=0)
     with db_connection() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
@@ -137,7 +103,6 @@ def get_todays_work_log_for_user(user_id: int) -> Optional[Dict]:
             return cursor.fetchone()
 
 def update_request_messages(request_id: int, msg1_id: int = None, msg2_id: int = None):
-    """Обновляет ID сообщений для запроса, чтобы их можно было редактировать."""
     with db_connection() as conn:
         with conn.cursor() as cursor:
             if msg1_id:
@@ -146,7 +111,6 @@ def update_request_messages(request_id: int, msg1_id: int = None, msg2_id: int =
                 cursor.execute("UPDATE requests SET manager_2_message_id = %s WHERE request_id = %s", (msg2_id, request_id))
 
 def set_session_state(user_id: int, state_data: Dict[str, Any]):
-    """Сохраняет или обновляет состояние сессии пользователя в формате JSON."""
     with db_connection() as conn:
         with conn.cursor() as cursor:
             state_copy = state_data.copy()
@@ -160,7 +124,6 @@ def set_session_state(user_id: int, state_data: Dict[str, Any]):
             )
 
 def get_session_state(user_id: int) -> Optional[Dict]:
-    """Получает состояние сессии пользователя и восстанавливает datetime объекты."""
     with db_connection() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute("SELECT state_json FROM work_sessions WHERE user_id = %s", (user_id,))
@@ -177,31 +140,42 @@ def get_session_state(user_id: int) -> Optional[Dict]:
             except (ValueError, TypeError): pass 
     return state_data
 
+def add_or_update_user(user_id: int, full_name: str, role: str = 'employee', manager_id_1: int = None, manager_id_2: int = None):
+    with db_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT time_bank_seconds FROM users WHERE user_id = %s", (user_id,))
+            row = cursor.fetchone()
+            current_bank = row[0] if row else 0
+            cursor.execute("""
+                INSERT INTO users (user_id, full_name, role, manager_id_1, manager_id_2, time_bank_seconds, office_latitude, office_longitude, office_radius_meters) 
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) 
+                ON CONFLICT (user_id) DO UPDATE SET 
+                full_name = EXCLUDED.full_name, role = EXCLUDED.role, 
+                manager_id_1 = EXCLUDED.manager_id_1, manager_id_2 = EXCLUDED.manager_id_2;
+                """, (user_id, full_name, role, manager_id_1, manager_id_2, current_bank, CONFIG.OFFICE_LATITUDE, CONFIG.OFFICE_LONGITUDE, CONFIG.OFFICE_RADIUS_METERS))
+    
 def get_user(user_id: int) -> Optional[Dict]:
-    """Получает всю информацию о пользователе."""
     with db_connection() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute("SELECT * FROM users WHERE user_id = %s", (user_id,))
             return cursor.fetchone()
 
 def get_all_users() -> List[Dict]:
-    """Получает список всех пользователей для админки."""
     with db_connection() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute("SELECT user_id, full_name, role FROM users ORDER BY full_name")
             return cursor.fetchall()
     
 def get_managed_users(manager_id: int) -> List[Dict]:
-    """Получает список сотрудников, закрепленных за руководителем."""
     with db_connection() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute("SELECT user_id, full_name FROM users WHERE manager_id_1 = %s OR manager_id_2 = %s", (manager_id, manager_id))
             return cursor.fetchall()
 
 def delete_user(user_id: int):
-    """Полностью удаляет пользователя и все связанные с ним данные из всех таблиц."""
     with db_connection() as conn:
         with conn.cursor() as cursor:
+            # Удаляем из всех таблиц, начиная с зависимых, чтобы избежать ошибок FK
             cursor.execute("DELETE FROM work_sessions WHERE user_id = %s", (user_id,))
             cursor.execute("DELETE FROM requests WHERE requester_id = %s", (user_id,))
             cursor.execute("DELETE FROM work_log WHERE user_id = %s", (user_id,))
@@ -211,7 +185,6 @@ def delete_user(user_id: int):
             cursor.execute("DELETE FROM users WHERE user_id = %s", (user_id,))
 
 def create_request(requester_id: int, request_type: str, request_data: Dict, msg_id_1: int = None, msg_id_2: int = None) -> int:
-    """Создает новый запрос на согласование."""
     with db_connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
@@ -221,20 +194,17 @@ def create_request(requester_id: int, request_type: str, request_data: Dict, msg
             return cursor.fetchone()[0]
 
 def get_request(request_id: int) -> Optional[Dict]:
-    """Получает информацию о запросе по его ID."""
     with db_connection() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute("SELECT * FROM requests WHERE request_id = %s", (request_id,))
             return cursor.fetchone()
 
 def update_request_status(request_id: int, status: str):
-    """Обновляет статус запроса (pending, approved, denied)."""
     with db_connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute("UPDATE requests SET status = %s WHERE request_id = %s", (status, request_id))
     
 def add_work_log(user_id: int, start_time: datetime.datetime, end_time: datetime.datetime, total_work_seconds: int, total_break_seconds: int, work_type: str):
-    """Добавляет запись о завершенном рабочем дне."""
     with db_connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
@@ -243,21 +213,18 @@ def add_work_log(user_id: int, start_time: datetime.datetime, end_time: datetime
             )
 
 def get_work_logs_for_user(user_id: int, start_date: str, end_date: str) -> List[Dict]:
-    """Получает логи работы пользователя за указанный период."""
     with db_connection() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute("SELECT * FROM work_log WHERE user_id = %s AND start_time >= %s AND start_time < %s", (user_id, start_date, end_date))
             return cursor.fetchall()
 
 def add_work_debt(user_id: int, debt_seconds: int):
-    """Добавляет запись о задолженности по времени."""
     with db_connection() as conn:
         with conn.cursor() as cursor:
             today_date = datetime.date.today()
             cursor.execute("INSERT INTO work_debt (user_id, debt_seconds, date_incurred) VALUES (%s, %s, %s)", (user_id, debt_seconds, today_date))
 
 def get_total_debt(user_id: int) -> int:
-    """Получает общую сумму непогашенной задолженности за текущий месяц."""
     with db_connection() as conn:
         with conn.cursor() as cursor:
             today = datetime.date.today()
@@ -267,13 +234,11 @@ def get_total_debt(user_id: int) -> int:
             return result[0] if result and result[0] else 0
 
 def update_time_bank(user_id: int, seconds_to_add: int):
-    """Изменяет банк времени пользователя на указанное количество секунд (может быть отрицательным)."""
     with db_connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute("UPDATE users SET time_bank_seconds = time_bank_seconds + %s WHERE user_id = %s", (seconds_to_add, user_id))
     
 def clear_work_debt(user_id: int, seconds_to_clear: int):
-    """Погашает задолженности пользователя, начиная с самых старых."""
     with db_connection() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute("SELECT debt_id, debt_seconds FROM work_debt WHERE user_id = %s AND status = 'pending' ORDER BY date_incurred ASC", (user_id,))
@@ -291,13 +256,11 @@ def clear_work_debt(user_id: int, seconds_to_clear: int):
                     break
 
 def add_debt_log(user_id: int, start_time: datetime.datetime, end_time: datetime.datetime, cleared_seconds: int):
-    """Добавляет запись о погашении долга."""
     with db_connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute("INSERT INTO debt_log (user_id, start_time, end_time, cleared_seconds) VALUES (%s, %s, %s, %s)", (user_id, start_time, end_time, cleared_seconds))
 
 def get_debt_logs_for_user(user_id: int, start_date: str, end_date: str) -> int:
-    """Получает сумму погашенных долгов за период."""
     with db_connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute("SELECT SUM(cleared_seconds) FROM debt_log WHERE user_id = %s AND start_time >= %s AND start_time < %s", (user_id, start_date, end_date))
@@ -305,13 +268,11 @@ def get_debt_logs_for_user(user_id: int, start_date: str, end_date: str) -> int:
             return result[0] if result and result[0] else 0
     
 def add_absence(user_id: int, absence_type: str, start_date: datetime.date, end_date: datetime.date):
-    """Добавляет запись об отсутствии (отпуск, больничный)."""
     with db_connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute("INSERT INTO absences (user_id, absence_type, start_date, end_date) VALUES (%s, %s, %s, %s)", (user_id, absence_type, start_date, end_date))
 
 def get_approved_request(user_id: int, request_type: str, date_str: str) -> bool:
-    """Проверяет, есть ли одобренный запрос определенного типа на указанную дату."""
     with db_connection() as conn:
         with conn.cursor() as cursor:
             query = "SELECT request_id FROM requests WHERE requester_id = %s AND request_type = %s AND status = 'approved' AND request_data->>'date' = %s"
@@ -319,7 +280,6 @@ def get_approved_request(user_id: int, request_type: str, date_str: str) -> bool
             return cursor.fetchone() is not None
 
 def delete_session_state(user_id: int):
-    """Удаляет текущую сессию пользователя (например, при завершении дня)."""
     with db_connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute("DELETE FROM work_sessions WHERE user_id = %s", (user_id,))

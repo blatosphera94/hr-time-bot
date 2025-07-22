@@ -1,22 +1,20 @@
 # Файл: bot.py
-# Главный файл для запуска бота. Собирает все компоненты вместе.
-
 import logging
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
-# --- Импорт наших собственных модулей ---
 from config import CONFIG
 import database as db
+
+# Импортируем наши обработчики из модулей
 from command_handlers import CommandHandlerManager
 from callback_handlers import callback_manager
 from conversation_handlers import (
-    absence_conv_handler,
-    report_conv_handler,
+    absence_conv_handler, 
+    report_conv_handler, 
     location_conv_handler
 )
 
-# --- 1. Настройка логирования ---
-# Настраиваем вывод логов в файл и в консоль.
+# Настройка логирования
 logging.basicConfig(
     level=CONFIG.LOG_LEVEL,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -27,42 +25,34 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-
-# --- 2. Глобальный обработчик ошибок ---
-# Эта функция будет вызываться, если в любом из хендлеров произойдет ошибка.
-# Она запишет ошибку в лог, но бот не упадет, а продолжит работать.
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Логирует ошибки, вызванные обновлениями."""
-    logger.error("Произошла ошибка при обработке обновления:", exc_info=context.error)
+    logger.error("Exception while handling an update:", exc_info=context.error)
 
-
-# --- 3. Главная функция запуска ---
 def main() -> None:
-    """Основная функция, которая собирает и запускает приложение бота."""
-
+    """Главная функция для запуска бота."""
+    
     logger.info("Инициализация базы данных...")
     db.init_db()
     logger.info("База данных успешно инициализирована.")
 
-    # Проверка наличия токена перед запуском
     if not CONFIG.TELEGRAM_BOT_TOKEN:
-        logger.critical("КРИТИЧЕСКАЯ ОШИБКА: Токен Telegram не найден! Проверьте файл .env")
+        logger.critical("ОШИБКА: Токен Telegram не найден в .env файле!")
         return
 
-    # Создание экземпляра приложения
     application = Application.builder().token(CONFIG.TELEGRAM_BOT_TOKEN).build()
-
-    # --- 4. Регистрация всех обработчиков ---
-
-    # Сначала регистрируем глобальный обработчик ошибок
+    
+    # Регистрация обработчика ошибок
     application.add_error_handler(error_handler)
+    
+    # --- Регистрация обработчиков ---
 
-    # Регистрируем обработчики диалогов (должны идти до общих обработчиков)
+    # 1. Диалоги (должны идти первыми, чтобы перехватывать свои состояния)
     application.add_handler(absence_conv_handler)
     application.add_handler(report_conv_handler)
     application.add_handler(location_conv_handler)
 
-    # Регистрируем обработчики команд ( /start, /help, etc.)
+    # 2. Команды ( /start, /help, etc.)
     application.add_handler(CommandHandler("start", CommandHandlerManager.start))
     application.add_handler(CommandHandler("adduser", CommandHandlerManager.add_user))
     application.add_handler(CommandHandler("users", CommandHandlerManager.list_users))
@@ -70,17 +60,11 @@ def main() -> None:
     application.add_handler(CommandHandler("report", CommandHandlerManager.report))
     application.add_handler(CommandHandler("help", CommandHandlerManager.help_command))
 
-    # Регистрируем главный обработчик нажатий на inline-кнопки
+    # 3. Обработчик всех нажатий на inline-кнопки (самый главный)
     application.add_handler(CallbackQueryHandler(callback_manager.main_handler))
-
-    # --- 5. Запуск бота ---
+    
     logger.info("Бот запускается...")
-    # run_polling() - это метод, который постоянно опрашивает Telegram о новых сообщениях
     application.run_polling()
 
-
-# --- 6. Точка входа в скрипт ---
-# Эта стандартная конструкция Python гарантирует, что функция main() будет вызвана
-# только тогда, когда файл запускается напрямую, а не импортируется как модуль.
 if __name__ == "__main__":
     main()

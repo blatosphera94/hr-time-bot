@@ -3,15 +3,8 @@ import re
 import datetime
 import logging
 from math import radians, sin, cos, sqrt, atan2
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
-from telegram.ext import (
-    ContextTypes, 
-    ConversationHandler, 
-    MessageHandler, 
-    CallbackQueryHandler, 
-    filters,
-    CommandHandler
-)
+from telegram import Update
+from telegram.ext import ContextTypes, ConversationHandler, MessageHandler, CallbackQueryHandler, filters, CommandHandler
 
 import database as db
 from config import CONFIG
@@ -20,13 +13,11 @@ from report_generator import ReportGenerator
 
 logger = logging.getLogger(__name__)
 
-# Определяем состояния для каждого диалога
+# Состояния
 GET_DATES_TEXT, GET_REPORT_DATES, GET_LOCATION = range(3)
 
-# --- Диалог 1: Оформление отсутствий ---
-
+# --- Диалог оформления отсутствий ---
 async def ask_for_dates_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Первый шаг: запрашивает у пользователя даты."""
     query = update.callback_query
     await query.answer()
     absence_type_key = query.data
@@ -41,7 +32,6 @@ async def ask_for_dates_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return GET_DATES_TEXT
 
 async def process_dates_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Второй шаг: обрабатывает введенные даты и завершает диалог."""
     user = update.effective_user
     user_input = update.message.text
     absence_type_key = context.user_data.get('absence_type')
@@ -61,7 +51,7 @@ async def process_dates_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await update.message.reply_text("Ошибка: не удалось найти ваш профиль.")
             return ConversationHandler.END
 
-        # Логика для запросов, требующих одобрения менеджером
+        # Логика для запросов, требующих одобрения
         if absence_type_key in ['request_remote_work', 'request_day_off']:
             if not user_info.get('manager_id_1') and not user_info.get('manager_id_2'):
                 await update.message.reply_text("Ошибка: за вами не закреплен руководитель для согласования.", reply_markup=await MenuGenerator.get_main_menu(user.id))
@@ -74,6 +64,7 @@ async def process_dates_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
             keyboard = [[InlineKeyboardButton("✅ Одобрить", callback_data=f'approve_{request_id}'), InlineKeyboardButton("❌ Отклонить", callback_data=f'deny_{request_id}')]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
+            # Отправка уведомлений руководителям
             msg_ids = {}
             if user_info.get('manager_id_1'):
                 msg = await context.bot.send_message(user_info['manager_id_1'], text_for_manager, reply_markup=reply_markup)
@@ -84,11 +75,12 @@ async def process_dates_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
             db.update_request_messages(request_id, **msg_ids)
             await update.message.reply_text(f"Ваш запрос на '{absence_name}' отправлен на согласование.", reply_markup=await MenuGenerator.get_main_menu(user.id))
 
-        # Логика для отсутствий, которые просто регистрируются (уведомление для менеджера)
+        # Логика для уведомлений
         else:
             db.add_absence(user.id, absence_name, start_date, end_date)
             await update.message.reply_text(f"{absence_name} с {start_date.strftime('%d.%m.%Y')} по {end_date.strftime('%d.%m.%Y')} успешно зарегистрирован.", reply_markup=await MenuGenerator.get_main_menu(user.id))
             
+            # Отправка FYI руководителям
             text_for_manager = f"FYI: Сотрудник {user_info['full_name']} оформил '{absence_name}' с {start_date.strftime('%d.%m.%Y')} по {end_date.strftime('%d.%m.%Y')}."
             if user_info.get('manager_id_1'): await context.bot.send_message(user_info['manager_id_1'], text_for_manager)
             if user_info.get('manager_id_2') and user_info.get('manager_id_2') != user_info.get('manager_id_1'): await context.bot.send_message(user_info['manager_id_2'], text_for_manager)
@@ -101,10 +93,8 @@ async def process_dates_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("Неверный формат даты. Попробуйте еще раз (ДД.ММ.ГГГГ) или введите /cancel.")
         return GET_DATES_TEXT
 
-# --- Диалог 2: Отчет за произвольный период ---
-
+# --- Диалог кастомного отчета ---
 async def ask_for_report_dates(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Первый шаг: запрашивает даты для отчета."""
     query = update.callback_query
     await query.answer()
     report_type = query.data.split('_')[-1]
@@ -113,7 +103,6 @@ async def ask_for_report_dates(update: Update, context: ContextTypes.DEFAULT_TYP
     return GET_REPORT_DATES
 
 async def process_report_dates(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Второй шаг: обрабатывает даты и отправляет отчет."""
     user_id = update.effective_user.id
     report_type = context.user_data.get('report_type')
     try:
@@ -142,26 +131,27 @@ async def process_report_dates(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text("Неверный формат. Попробуйте еще раз или введите /cancel")
         return GET_REPORT_DATES
 
-# --- Диалог 3: Проверка геолокации ---
-
+# --- Диалог проверки геолокации ---
 async def ask_for_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Первый шаг: запрашивает геолокацию с помощью Reply-кнопки."""
+    """Запрашивает геолокацию после нажатия кнопки начала рабочего дня в офисе."""
     query = update.callback_query
     await query.answer()
     
-    keyboard = [[KeyboardButton("📍 Отправить мою геолокацию", request_location=True)]]
+    keyboard = [[
+        KeyboardButton("📍 Отправить мою геолокацию", request_location=True)
+    ]]
     
     await context.bot.send_message(
         chat_id=query.from_user.id,
         text="Для начала работы в офисе, пожалуйста, подтвердите ваше местоположение, нажав на кнопку ниже.",
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
     )
-    # Удаляем inline-сообщение, чтобы не смущать пользователя
+    # Удаляем inline-кнопку, чтобы не смущать пользователя
     await query.delete_message()
     return GET_LOCATION
 
 async def process_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Второй шаг: обрабатывает полученную геолокацию и начинает рабочий день."""
+    """Обрабатывает полученную геолокацию."""
     user = update.effective_user
     user_location = update.message.location
     await update.message.reply_text("Проверяем вашу геолокацию...", reply_markup=ReplyKeyboardRemove())
@@ -171,16 +161,19 @@ async def process_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await update.message.reply_text("Ошибка: Координаты офиса не настроены. Обратитесь к администратору.")
         return ConversationHandler.END
 
-    R = 6371.0
+    # Формула гаверсинуса для расчета расстояния
+    R = 6371.0  # Радиус Земли в км
     lat1, lon1 = radians(user_info['office_latitude']), radians(user_info['office_longitude'])
     lat2, lon2 = radians(user_location.latitude), radians(user_location.longitude)
+    
     dlon, dlat = lon2 - lon1, lat2 - lat1
     a = sin(dlat / 2)**2 + cos(lat1) * cos(lat2) * sin(dlon / 2)**2
     c = 2 * atan2(sqrt(a), sqrt(1 - a))
-    distance = R * c * 1000
+    distance = R * c * 1000 # Расстояние в метрах
 
     if distance <= user_info.get('office_radius_meters', CONFIG.OFFICE_RADIUS_METERS):
-        from callback_handlers import callback_manager
+        # Начинаем рабочий день (логика из callback_handlers)
+        from callback_handlers import callback_manager # Избегаем циклического импорта
         await callback_manager.start_work(update, user.id, is_remote=False)
     else:
         await update.message.reply_text(
@@ -190,15 +183,14 @@ async def process_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     return ConversationHandler.END
 
 
-# --- Общая функция отмены для всех диалогов ---
-
+# --- Общая функция отмены ---
 async def cancel_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Отменяет текущий диалог и возвращает пользователя в основное меню."""
     user_id = update.effective_user.id
     text = "Действие отменено."
 
     if update.callback_query:
         await update.callback_query.answer()
+        # Показываем актуальное меню
         user_info = db.get_user(user_id)
         session_state = db.get_session_state(user_id)
         
@@ -216,8 +208,7 @@ async def cancel_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE
     context.user_data.clear()
     return ConversationHandler.END
 
-# --- Создание экземпляров хендлеров для импорта в bot.py ---
-
+# Создаем хендлеры для импорта в bot.py
 absence_conv_handler = ConversationHandler(
     entry_points=[CallbackQueryHandler(ask_for_dates_text, pattern='^(request_remote_work|absence_sick|absence_vacation|absence_trip|request_day_off)$')],
     states={GET_DATES_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_dates_text)]},

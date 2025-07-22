@@ -7,35 +7,26 @@ from utils import get_now, seconds_to_str
 from config import CONFIG
 
 class MenuGenerator:
-    """
-    Класс, отвечающий за генерацию всех клавиатур в боте.
-    Централизация логики меню делает код чище и проще для поддержки.
-    """
+    """Класс, отвечающий за генерацию всех клавиатур в боте."""
 
     @staticmethod
     async def get_main_menu(user_id: int) -> Optional[InlineKeyboardMarkup]:
-        """
-        Генерирует главное меню в зависимости от статуса и прав пользователя.
-        Это "динамическое" меню, которое меняется в зависимости от контекста.
-        """
+        """Генерирует главное меню в зависимости от статуса и прав пользователя."""
         today = get_now().date()
         
-        # 1. Проверка на активное отсутствие (отпуск, больничный)
+        # Проверка на активное отсутствие
         absences = db.get_absences_for_user(user_id, today)
         if absences:
-            # Если есть отсутствие, меню не показываем.
-            # Сообщение об отсутствии будет отправлено из command_handlers.py
+            # Если есть отсутствие, меню не показываем (сообщение отправит command_handler)
             return None
         
-        # 2. Проверка на выходной или уже отработанный день
-        is_weekend = today.weekday() >= 5 # Суббота или Воскресенье
+        # Проверка на выходной или уже отработанный день
+        is_weekend = today.weekday() >= 5
         today_logs = db.get_todays_work_log_for_user(user_id)
         if today_logs and not is_weekend:
-            # Если сегодня не выходной, но уже есть запись о работе,
-            # считаем день отработанным и показываем "меню выходного дня".
-            is_weekend = True
+            is_weekend = True # Считаем день отработанным, как выходной
 
-        # 3. Формирование меню для выходного или отработанного дня
+        # Меню для выходного или отработанного дня
         if is_weekend:
             buttons = [
                 {"text": "🛠️ Доп. работа", "callback": "additional_work_menu"},
@@ -43,7 +34,7 @@ class MenuGenerator:
             ]
             return MenuGenerator.generate_from_list(buttons)
 
-        # 4. Формирование стандартного меню для рабочего дня
+        # Стандартное меню для рабочего дня
         today_str = str(today)
         approved_remote_work = db.get_approved_request(user_id, 'Удаленная работа', today_str)
         
@@ -51,10 +42,9 @@ class MenuGenerator:
         if approved_remote_work:
             buttons.append({"text": "☀️ Начать работу (удаленно)", "callback": "start_work_remote"})
         else:
-            # Эта кнопка запустит диалог запроса геолокации
+            # Добавляем кнопку для запроса геолокации
             buttons.append({"text": "☀️ Начать рабочий день (в офисе)", "callback": "start_work_office_location"})
         
-        # Добавляем остальные стандартные кнопки
         buttons.extend([
             {"text": "🏦 Банк времени", "callback": "show_time_bank"},
             {"text": "🛠️ Доп. работа", "callback": "additional_work_menu"},
@@ -66,7 +56,6 @@ class MenuGenerator:
 
     @staticmethod
     def get_working_menu() -> InlineKeyboardMarkup:
-        """Возвращает меню для пользователя в статусе 'работает'."""
         buttons = [
             {"text": "🌙 Закончить рабочий день", "callback": "end_work"},
             {"text": "☕ Уйти на перерыв", "callback": "start_break"},
@@ -79,7 +68,6 @@ class MenuGenerator:
 
     @staticmethod
     def get_break_menu() -> InlineKeyboardMarkup:
-        """Возвращает меню для пользователя в статусе 'на перерыве'."""
         buttons = [
             {"text": "▶️ Вернуться с перерыва", "callback": "end_break"},
             {"text": "🏦 Банк времени", "callback": "show_time_bank"},
@@ -91,7 +79,6 @@ class MenuGenerator:
         
     @staticmethod
     def get_manager_menu() -> InlineKeyboardMarkup:
-        """Возвращает меню для руководителя/администратора."""
         buttons = [
             {"text": "👨‍💻 Статус команды", "callback": "team_status_button"},
             {"text": "📊 Отчет по команде", "callback": "manager_report_button"},
@@ -101,15 +88,12 @@ class MenuGenerator:
 
     @staticmethod
     def get_report_period_menu(is_manager: bool = False, in_session: bool = False) -> InlineKeyboardMarkup:
-        """Возвращает меню выбора периода для отчета."""
         base_callback = "manager" if is_manager else "employee"
         buttons = [
             {"text": "📊 Отчет за сегодня", "callback": f'report_today_{base_callback}'},
             {"text": "🗓️ Отчет за текущий месяц", "callback": f'report_this_month_{base_callback}'},
             {"text": "📅 Выбрать другой период", "callback": f'report_custom_period_{base_callback}'}
         ]
-        
-        # Определяем, на какое меню вернет кнопка "Назад"
         back_button_data = 'back_to_main_menu'
         if is_manager:
             back_button_data = 'back_to_manager_menu'
@@ -122,7 +106,6 @@ class MenuGenerator:
 
     @staticmethod
     def get_additional_work_menu(user_id: int) -> InlineKeyboardMarkup:
-        """Возвращает меню для выбора типа дополнительной работы."""
         total_debt_seconds = db.get_total_debt(user_id)
         buttons = []
         if total_debt_seconds > 0:
@@ -135,7 +118,6 @@ class MenuGenerator:
 
     @staticmethod
     def get_extra_work_active_menu(status: str, start_time: datetime.datetime) -> (str, InlineKeyboardMarkup):
-        """Возвращает текст и меню для активной сессии доп. работы."""
         duration_str = seconds_to_str((get_now() - start_time).total_seconds())
         
         if status == 'clearing_debt':
@@ -152,7 +134,6 @@ class MenuGenerator:
 
     @staticmethod
     def get_absence_menu() -> InlineKeyboardMarkup:
-        """Возвращает меню выбора типа отсутствия."""
         buttons = [
             {"text": "💻 Удаленная работа (запрос)", "callback": "request_remote_work"},
             {"text": "🙋‍♂️ Попросить отгул", "callback": "request_day_off"},
@@ -165,7 +146,6 @@ class MenuGenerator:
 
     @staticmethod
     def get_early_leave_menu() -> InlineKeyboardMarkup:
-        """Возвращает меню для выбора действия при раннем уходе."""
         buttons = [
             {"text": "Использовать банк времени", "callback": "end_work_use_bank"},
             {"text": "Запросить согласование", "callback": "end_work_ask_manager"},
@@ -175,6 +155,7 @@ class MenuGenerator:
 
     @staticmethod
     def generate_from_list(buttons: List[dict]) -> InlineKeyboardMarkup:
-        """Универсальный метод генерации меню из списка словарей (одна кнопка в ряду)."""
+        """Универсальный метод генерации меню: одна кнопка в ряду."""
         keyboard = [[InlineKeyboardButton(btn['text'], callback_data=btn['callback'])] for btn in buttons]
         return InlineKeyboardMarkup(keyboard)
+

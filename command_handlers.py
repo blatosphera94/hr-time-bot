@@ -15,10 +15,7 @@ class CommandHandlerManager:
 
     @staticmethod
     async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """
-        Обрабатывает команду /start.
-        Это главная точка входа для пользователя. Логика зависит от роли и текущего статуса.
-        """
+        """Обрабатывает команду /start, маршрутизируя по ролям и статусам."""
         user_id = update.effective_user.id
         user_info = db.get_user(user_id)
 
@@ -26,7 +23,7 @@ class CommandHandlerManager:
             await update.message.reply_text("Ваш аккаунт не зарегистрирован. Обратитесь к администратору.")
             return
 
-        # 1. Проверка на активное отсутствие (отпуск, больничный и т.д.)
+        # Проверка на активное отсутствие
         today = get_now().date()
         absences = db.get_absences_for_user(user_id, today)
         if absences:
@@ -42,19 +39,18 @@ class CommandHandlerManager:
             await update.message.reply_text(text)
             return
 
-        # 2. Маршрутизация по роли пользователя
+        # Маршрутизация по роли
         role = user_info.get('role', 'employee')
         if role in ['admin', 'manager']:
             await update.message.reply_text("Меню руководителя:", reply_markup=MenuGenerator.get_manager_menu())
             return
         
-        # 3. Логика для сотрудника: восстановление сессии или показ главного меню
+        # Логика для сотрудника
         session_state = db.get_session_state(user_id)
         if not session_state or not session_state.get('status'):
             main_menu_markup = await MenuGenerator.get_main_menu(user_id)
             await update.message.reply_text("Выберите действие:", reply_markup=main_menu_markup)
         else:
-            # Если у пользователя есть активная сессия, восстанавливаем его меню
             status = session_state.get('status')
             if status == 'working':
                 await update.message.reply_text("Вы работаете. Меню восстановлено:", reply_markup=MenuGenerator.get_working_menu())
@@ -67,7 +63,7 @@ class CommandHandlerManager:
     @staticmethod
     @admin_only
     async def add_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Добавляет или обновляет пользователя. Только для администраторов."""
+        """Добавляет или обновляет пользователя."""
         try:
             args = context.args
             if len(args) < 2:
@@ -75,6 +71,7 @@ class CommandHandlerManager:
                 return
             
             user_id_str = args[0]
+            # Улучшенный парсинг имени в кавычках
             match = re.search(r'"(.*?)"', " ".join(args[1:]))
             if not match:
                 full_name = args[1]
@@ -102,7 +99,7 @@ class CommandHandlerManager:
     @staticmethod
     @admin_only
     async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Показывает список всех зарегистрированных пользователей. Только для администраторов."""
+        """Показывает список всех зарегистрированных пользователей."""
         all_users = db.get_all_users()
         if not all_users:
             await update.message.reply_text("В базе данных пока нет пользователей.")
@@ -117,7 +114,7 @@ class CommandHandlerManager:
     @staticmethod
     @admin_only
     async def del_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Удаляет пользователя по ID. Только для администраторов."""
+        """Удаляет пользователя по ID."""
         try:
             target_user_id = int(context.args[0])
             user_info = db.get_user(target_user_id)
@@ -125,6 +122,7 @@ class CommandHandlerManager:
                 await update.message.reply_text(f"Пользователь с ID {target_user_id} не найден.")
                 return
             
+            # Предлагаем подтверждение
             text = f"Вы уверены, что хотите удалить пользователя {user_info['full_name']}? Это действие необратимо и удалит все связанные данные."
             keyboard = [[
                 InlineKeyboardButton("ДА, УДАЛИТЬ", callback_data=f"confirm_delete_{target_user_id}"),
@@ -145,32 +143,32 @@ class CommandHandlerManager:
         await update.message.reply_text("Выберите период для отчета:", reply_markup=MenuGenerator.get_report_period_menu(is_manager=is_manager, in_session=bool(session_state)))
 
     @staticmethod
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отправляет справочное сообщение в зависимости от роли пользователя."""
-    user_id = update.effective_user.id
-    user_info = db.get_user(user_id)
-    
-    help_text = "Инструкция по использованию бота:\n\n"
-    if user_info and user_info.get('role') == 'admin':
-        help_text += ("**Вы — Администратор.**\n\n"
-                      "`/adduser ID \"Имя Фамилия\" [роль] [ID_рук]` - добавить/изменить пользователя.\n"
-                      "`/users` - посмотреть список всех пользователей.\n"
-                      "`/deluser ID` - удалить пользователя по ID.\n"
-                      "`/report` - отчет по команде.\n"
-                      "`/help` - эта справка.")
-    elif user_info and user_info.get('role') == 'manager':
-        help_text += ("**Вы — Руководитель.**\n\n"
-                      "Команда `/start` вызовет ваше меню с кнопкой отчета по команде.\n"
-                      "Вы будете получать запросы на согласование отгулов, удаленной работы и раннего ухода от ваших сотрудников.\n"
-                      "`/help` - эта справка.")
-    elif user_info and user_info.get('role') == 'employee':
-        help_text += ("**Вы — Сотрудник.**\n\n"
-                      "- Начинайте и заканчивайте рабочий день кнопками.\n"
-                      "- Фиксируйте перерывы.\n"
-                      "- Запрашивайте отсутствия через меню 'Оформить отсутствие'.\n"
-                      "`/help` - эта справка.")
-    else:
-        help_text += "Ваш аккаунт не зарегистрирован. Пожалуйста, обратитесь к администратору."
-    
-    # Отправляем сообщение в чат, а не в ответ на callback, для единообразия
-    await context.bot.send_message(chat_id=user_id, text=help_text, parse_mode='Markdown')
+    async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Отправляет справочное сообщение."""
+        user_id = update.effective_user.id
+        user_info = db.get_user(user_id)
+        
+        help_text = "Инструкция по использованию бота:\n\n"
+        if user_info and user_info['role'] == 'admin':
+            help_text += ("**Вы — Администратор.**\n\n"
+                          "`/adduser ID \"Имя Фамилия\" [роль] [ID_рук]` - добавить/изменить пользователя.\n"
+                          "`/users` - посмотреть список всех пользователей.\n"
+                          "`/deluser ID` - удалить пользователя по ID.\n"
+                          "`/report` - отчет по команде.\n"
+                          "`/help` - эта справка.")
+        elif user_info and user_info['role'] == 'manager':
+            help_text += ("**Вы — Руководитель.**\n\n"
+                          "Команда `/start` вызовет ваше меню с кнопкой отчета по команде.\n"
+                          "Вы будете получать запросы на согласование отгулов, удаленной работы и раннего ухода от ваших сотрудников.\n"
+                          "`/help` - эта справка.")
+        elif user_info and user_info['role'] == 'employee':
+            help_text += ("**Вы — Сотрудник.**\n\n"
+                          "- Начинайте и заканчивайте рабочий день кнопками.\n"
+                          "- Фиксируйте перерывы.\n"
+                          "- Запрашивайте отсутствия через меню 'Оформить отсутствие'.\n"
+                          "`/help` - эта справка.")
+        else:
+            help_text += "Ваш аккаунт не зарегистрирован. Пожалуйста, обратитесь к администратору."
+        
+        # Отправляем сообщение в чат, а не в ответ на callback, если это возможно
+        await context.bot.send_message(chat_id=user_id, text=help_text, parse_mode='Markdown')
