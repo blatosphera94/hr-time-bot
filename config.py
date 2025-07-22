@@ -20,8 +20,8 @@ class BotConfig:
     MIN_WORK_SECONDS: int = 8 * 3600    # 8 часов
 
     # --- Настройки геолокации офиса ---
-    OFFICE_LATITUDE: float = 53.3479
-    OFFICE_LONGITUDE: float = 83.7796
+    OFFICE_LATITUDE: float = 53.356422
+    OFFICE_LONGITUDE: float = 83.771422
     OFFICE_RADIUS_METERS: int = 200
 
     # --- Настройки логирования ---
