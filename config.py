@@ -9,7 +9,7 @@ load_dotenv()
 class BotConfig:
     # --- Основные настройки ---
     TELEGRAM_BOT_TOKEN: str = os.getenv('TELEGRAM_BOT_TOKEN')
-    ADMIN_IDS: List[int] = [663884842]
+    ADMIN_IDS: List[int] = [384630608]
 
     # --- Настройки базы данных ---
     DATABASE_URL: str = os.getenv('DATABASE_URL')
