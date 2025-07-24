@@ -9,7 +9,7 @@ load_dotenv()
 class BotConfig:
     # --- Основные настройки ---
     TELEGRAM_BOT_TOKEN: str = os.getenv('TELEGRAM_BOT_TOKEN')
-    ADMIN_IDS: List[int] = [384630608]
+    ADMIN_IDS: List[int] = [384630608] # Убедитесь, что здесь ваш правильный ID
 
     # --- Настройки базы данных ---
     DATABASE_URL: str = os.getenv('DATABASE_URL')
@@ -20,17 +20,18 @@ class BotConfig:
     MIN_WORK_SECONDS: int = 8 * 3600    # 8 часов
 
     # --- Настройки геолокации офиса ---
-    OFFICE_LATITUDE: float = 53.356422
-    OFFICE_LONGITUDE: float = 83.771422
+    OFFICE_LATITUDE: float = 53.3479
+    OFFICE_LONGITUDE: float = 83.7796
     OFFICE_RADIUS_METERS: int = 200
 
     # --- Настройки логирования ---
     LOG_LEVEL: str = 'INFO'
-    LOG_FILE_PATH: str = 'bot.log'
+    LOG_FILE_PATH: str = '/root/hr-time-bot/bot.log'
 
     # --- Словари для маппинга ---
     ABSENCE_TYPE_MAP: dict = {
         'absence_sick': 'Больничный',
+        'absence_sick_child': 'Больничный по уходу за ребенком', # <-- НОВОЕ
         'absence_vacation': 'Отпуск',
         'absence_trip': 'Командировка',
         'request_remote_work': 'Удаленная работа',

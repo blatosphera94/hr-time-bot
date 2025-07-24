@@ -1,4 +1,6 @@
 # Файл: database.py
+# Этот модуль содержит все функции для взаимодействия с базой данных PostgreSQL.
+
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import json
@@ -12,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 @contextmanager
 def db_connection():
+    """Контекстный менеджер для безопасных транзакций с базой данных."""
     conn = None
     try:
         conn = psycopg2.connect(CONFIG.DATABASE_URL)
@@ -25,6 +28,7 @@ def db_connection():
         if conn: conn.close()
 
 def init_db(drop_existing=False):
+    """Инициализирует базу данных, создавая таблицы, если их нет."""
     tables = ['users', 'work_sessions', 'requests', 'work_log', 'work_debt', 'debt_log', 'absences']
     with db_connection() as conn:
         with conn.cursor() as cursor:
@@ -36,15 +40,21 @@ def init_db(drop_existing=False):
             logger.info("Создание таблиц...")
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS users (
-                    user_id BIGINT PRIMARY KEY, full_name TEXT NOT NULL, role TEXT, 
-                    manager_id_1 BIGINT, manager_id_2 BIGINT, 
+                    user_id BIGINT PRIMARY KEY,
+                    full_name TEXT NOT NULL,
+                    role TEXT DEFAULT 'employee',
+                    manager_id_1 BIGINT,
+                    manager_id_2 BIGINT,
                     time_bank_seconds INTEGER DEFAULT 0,
-                    office_latitude REAL, office_longitude REAL, office_radius_meters INTEGER
+                    office_latitude REAL,
+                    office_longitude REAL,
+                    office_radius_meters INTEGER
                 )''')
             
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS work_sessions (
-                    user_id BIGINT PRIMARY KEY, state_json JSONB,
+                    user_id BIGINT PRIMARY KEY,
+                    state_json JSONB,
                     CONSTRAINT fk_user FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE
                 )''')
             
@@ -63,7 +73,7 @@ def init_db(drop_existing=False):
                     total_break_seconds INTEGER, work_type TEXT DEFAULT 'office',
                     CONSTRAINT fk_user FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE
                 )''')
-            
+                
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS work_debt (
                     debt_id SERIAL PRIMARY KEY, user_id BIGINT, debt_seconds INTEGER, 
@@ -87,6 +97,7 @@ def init_db(drop_existing=False):
     logger.info("База данных успешно инициализирована.")
 
 def get_absences_for_user(user_id: int, check_date: datetime.date) -> List[Dict]:
+    """Находит активные отсутствия для пользователя на КОНКРЕТНУЮ ДАТУ."""
     with db_connection() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(
@@ -95,7 +106,22 @@ def get_absences_for_user(user_id: int, check_date: datetime.date) -> List[Dict]
             )
             return cursor.fetchall()
 
+def get_absences_for_user_in_period(user_id: int, start_date: datetime.date, end_date: datetime.date) -> List[Dict]:
+    """
+    Находит все отсутствия, которые пересекаются с заданным ДИАПАЗОНОМ ДАТ.
+    Это нужно для отчетов руководителя.
+    """
+    with db_connection() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            # Логика запроса: найти все записи, где (начало_отсутствия <= конец_периода) И (конец_отсутствия >= начало_периода)
+            cursor.execute(
+                "SELECT * FROM absences WHERE user_id = %s AND start_date <= %s AND end_date >= %s",
+                (user_id, end_date, start_date)
+            )
+            return cursor.fetchall()
+
 def get_todays_work_log_for_user(user_id: int) -> Optional[Dict]:
+    """Получает последний лог работы для пользователя за сегодня."""
     today_start = datetime.datetime.now(LOCAL_TZ).replace(hour=0, minute=0, second=0, microsecond=0)
     with db_connection() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
@@ -175,7 +201,6 @@ def get_managed_users(manager_id: int) -> List[Dict]:
 def delete_user(user_id: int):
     with db_connection() as conn:
         with conn.cursor() as cursor:
-            # Удаляем из всех таблиц, начиная с зависимых, чтобы избежать ошибок FK
             cursor.execute("DELETE FROM work_sessions WHERE user_id = %s", (user_id,))
             cursor.execute("DELETE FROM requests WHERE requester_id = %s", (user_id,))
             cursor.execute("DELETE FROM work_log WHERE user_id = %s", (user_id,))

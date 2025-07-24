@@ -1,4 +1,6 @@
-# Файл: callback_handlers.py (Полная, проверенная версия)
+# Файл: callback_handlers.py
+# Этот модуль содержит всю логику для обработки нажатий на inline-кнопки.
+
 import datetime
 import logging
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
@@ -10,19 +12,30 @@ from menu_generator import MenuGenerator
 from report_generator import ReportGenerator
 from utils import get_now, end_workday_logic, seconds_to_str
 
-logger = logging.getLogger(_name_)
+logger = logging.getLogger(__name__)
 
 class CallbackHandlerManager:
+    """
+    Класс-менеджер, который обрабатывает все callback-запросы от inline-клавиатур.
+    Каждая кнопка в боте в итоге вызывает один из методов этого класса.
+    """
+
     async def main_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        Главный маршрутизатор для всех callback-запросов.
+        Он получает callback_data от кнопки и вызывает соответствующий метод этого класса.
+        """
         query = update.callback_query
+        # Немедленно отвечаем на callback, чтобы пользователь не видел "часики" у кнопки.
         await query.answer()
         
         user_id = query.from_user.id
         command = query.data
 
+        # Словарь-маршрутизатор для статичных команд (без параметров в callback_data)
         routes = {
             'show_status': self.show_status,
-            'show_time_bank': self.show_time_bank, # Эта строка есть
+            'show_time_bank': self.show_time_bank,
             'absence_menu': self.absence_menu,
             'back_to_main_menu': self.back_to_main_menu,
             'back_to_working_menu': self.back_to_working_menu,
@@ -50,6 +63,7 @@ class CallbackHandlerManager:
 
         if handler_method:
             await handler_method(update, context)
+        # Обработка динамических callback'ов (с ID или другими параметрами)
         elif command.startswith(('approve_', 'deny_', 'approve_no_debt_', 'ack_request_')):
             await self.process_manager_decision(update, context)
         elif command.startswith('user_details_'):
@@ -90,6 +104,7 @@ class CallbackHandlerManager:
         await query.answer(text=status_text, show_alert=True)
 
     async def show_time_bank(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Показывает всплывающее уведомление с состоянием банка времени."""
         query = update.callback_query
         user_id = query.from_user.id
         user_info = db.get_user(user_id)
@@ -317,7 +332,6 @@ class CallbackHandlerManager:
                 f"Банк времени: {seconds_to_str(info.get('time_bank_seconds',0))}\n"
                 f"ID Рук. 1: {info.get('manager_id_1', 'Н/Д')}\nID Рук. 2: {info.get('manager_id_2', 'Н/Д')}")
         keyboard = [
-            # Заменили прямое удаление на вызов команды /deluser для безопасности
             [InlineKeyboardButton("« Назад к списку", callback_data="show_all_users")]
         ]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
@@ -427,5 +441,6 @@ class CallbackHandlerManager:
         db.delete_session_state(user_id)
         await query.edit_message_text(text, reply_markup=await MenuGenerator.get_main_menu(user_id))
 
+
 # Создаем единственный экземпляр класса для импорта в bot.py
-callback_manager = CallbackHandlerManager()
+callback_manager = CallbackHandlerManager()```

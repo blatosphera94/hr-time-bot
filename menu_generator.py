@@ -11,22 +11,17 @@ class MenuGenerator:
 
     @staticmethod
     async def get_main_menu(user_id: int) -> Optional[InlineKeyboardMarkup]:
-        """Генерирует главное меню в зависимости от статуса и прав пользователя."""
         today = get_now().date()
         
-        # Проверка на активное отсутствие
         absences = db.get_absences_for_user(user_id, today)
         if absences:
-            # Если есть отсутствие, меню не показываем (сообщение отправит command_handler)
             return None
         
-        # Проверка на выходной или уже отработанный день
         is_weekend = today.weekday() >= 5
         today_logs = db.get_todays_work_log_for_user(user_id)
         if today_logs and not is_weekend:
-            is_weekend = True # Считаем день отработанным, как выходной
+            is_weekend = True
 
-        # Меню для выходного или отработанного дня
         if is_weekend:
             buttons = [
                 {"text": "🛠️ Доп. работа", "callback": "additional_work_menu"},
@@ -34,7 +29,6 @@ class MenuGenerator:
             ]
             return MenuGenerator.generate_from_list(buttons)
 
-        # Стандартное меню для рабочего дня
         today_str = str(today)
         approved_remote_work = db.get_approved_request(user_id, 'Удаленная работа', today_str)
         
@@ -42,7 +36,6 @@ class MenuGenerator:
         if approved_remote_work:
             buttons.append({"text": "☀️ Начать работу (удаленно)", "callback": "start_work_remote"})
         else:
-            # Добавляем кнопку для запроса геолокации
             buttons.append({"text": "☀️ Начать рабочий день (в офисе)", "callback": "start_work_office_location"})
         
         buttons.extend([
@@ -138,6 +131,7 @@ class MenuGenerator:
             {"text": "💻 Удаленная работа (запрос)", "callback": "request_remote_work"},
             {"text": "🙋‍♂️ Попросить отгул", "callback": "request_day_off"},
             {"text": "🤧 Больничный", "callback": "absence_sick"},
+            {"text": "👶 Больничный (по уходу)", "callback": "absence_sick_child"}, # <-- НОВОЕ
             {"text": "🌴 Отпуск", "callback": "absence_vacation"},
             {"text": "✈️ Командировка", "callback": "absence_trip"},
             {"text": "« Назад", "callback": "back_to_main_menu"}
@@ -158,4 +152,3 @@ class MenuGenerator:
         """Универсальный метод генерации меню: одна кнопка в ряду."""
         keyboard = [[InlineKeyboardButton(btn['text'], callback_data=btn['callback'])] for btn in buttons]
         return InlineKeyboardMarkup(keyboard)
-

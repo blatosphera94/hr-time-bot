@@ -15,7 +15,10 @@ class CommandHandlerManager:
 
     @staticmethod
     async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Обрабатывает команду /start, маршрутизируя по ролям и статусам."""
+        """
+        Обрабатывает команду /start, проверяя статус отсутствия пользователя
+        перед отображением соответствующего меню.
+        """
         user_id = update.effective_user.id
         user_info = db.get_user(user_id)
 
@@ -23,29 +26,47 @@ class CommandHandlerManager:
             await update.message.reply_text("Ваш аккаунт не зарегистрирован. Обратитесь к администратору.")
             return
 
-        # Проверка на активное отсутствие
+        # --- ГЛАВНАЯ ЛОГИКА ПРОВЕРКИ ОТСУТСТВИЯ ---
         today = get_now().date()
         absences = db.get_absences_for_user(user_id, today)
+        
         if absences:
             absence = absences[0]
-            absence_type = absence['absence_type'].lower()
+            # Находим ключ (например, 'absence_sick') по значению ('Больничный')
+            absence_type_key = next((key for key, value in CONFIG.ABSENCE_TYPE_MAP.items() if value == absence['absence_type']), None)
             end_date_str = absence['end_date'].strftime('%d.%m.%Y')
-            messages = {
-                'отпуск': f"Вы в отпуске до {end_date_str}. Хорошего отдыха!",
-                'больничный': f"Вы на больничном до {end_date_str}. Скорейшего выздоровления!",
-                'командировка': f"Вы в командировке до {end_date_str}. Успешной поездки!"
-            }
-            text = messages.get(absence_type, f"У вас оформлено отсутствие до {end_date_str}.")
-            await update.message.reply_text(text)
-            return
 
-        # Маршрутизация по роли
+            # --- ОСОБЫЙ СЛУЧАЙ: БОЛЬНИЧНЫЙ ПО УХОДУ ---
+            if absence_type_key == 'absence_sick_child':
+                text = (f"Здравствуйте, {update.effective_user.first_name}.\n"
+                        f"У вас оформлен больничный по уходу до {end_date_str}. "
+                        f"При необходимости вы можете работать удаленно.")
+                
+                buttons = [
+                    {"text": "💻 Начать работу (удаленно)", "callback": "start_work_remote"},
+                    {"text": "❓ Помощь", "callback": "help_button"}
+                ]
+                await update.message.reply_text(text, reply_markup=MenuGenerator.generate_from_list(buttons))
+                return
+
+            # --- ОБЫЧНЫЕ СЛУЧАИ ОТСУТСТВИЙ (С ПЕРСОНАЛИЗАЦИЕЙ) ---
+            else:
+                messages = {
+                    'absence_vacation': f"Вы в отпуске до {end_date_str}. Хорошего отдыха!",
+                    'absence_sick': f"Вы на больничном до {end_date_str}. Скорейшего выздоровления!",
+                    'absence_trip': f"Вы в командировке до {end_date_str}. Успешной поездки!"
+                }
+                text = messages.get(absence_type_key, f"У вас оформлено отсутствие до {end_date_str}.")
+                await update.message.reply_text(text)
+                return
+
+        # --- ЕСЛИ ОТСУТСТВИЙ НЕТ, ПРОДОЛЖАЕМ СТАНДАРТНУЮ ЛОГИКУ ---
+        
         role = user_info.get('role', 'employee')
         if role in ['admin', 'manager']:
             await update.message.reply_text("Меню руководителя:", reply_markup=MenuGenerator.get_manager_menu())
             return
         
-        # Логика для сотрудника
         session_state = db.get_session_state(user_id)
         if not session_state or not session_state.get('status'):
             main_menu_markup = await MenuGenerator.get_main_menu(user_id)
@@ -63,7 +84,6 @@ class CommandHandlerManager:
     @staticmethod
     @admin_only
     async def add_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Добавляет или обновляет пользователя."""
         try:
             args = context.args
             if len(args) < 2:
@@ -71,7 +91,6 @@ class CommandHandlerManager:
                 return
             
             user_id_str = args[0]
-            # Улучшенный парсинг имени в кавычках
             match = re.search(r'"(.*?)"', " ".join(args[1:]))
             if not match:
                 full_name = args[1]
@@ -99,7 +118,6 @@ class CommandHandlerManager:
     @staticmethod
     @admin_only
     async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Показывает список всех зарегистрированных пользователей."""
         all_users = db.get_all_users()
         if not all_users:
             await update.message.reply_text("В базе данных пока нет пользователей.")
@@ -114,7 +132,6 @@ class CommandHandlerManager:
     @staticmethod
     @admin_only
     async def del_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Удаляет пользователя по ID."""
         try:
             target_user_id = int(context.args[0])
             user_info = db.get_user(target_user_id)
@@ -122,8 +139,7 @@ class CommandHandlerManager:
                 await update.message.reply_text(f"Пользователь с ID {target_user_id} не найден.")
                 return
             
-            # Предлагаем подтверждение
-            text = f"Вы уверены, что хотите удалить пользователя {user_info['full_name']}? Это действие необратимо и удалит все связанные данные."
+            text = f"Вы уверены, что хотите удалить пользователя {user_info['full_name']}? Это действие необратимо."
             keyboard = [[
                 InlineKeyboardButton("ДА, УДАЛИТЬ", callback_data=f"confirm_delete_{target_user_id}"),
                 InlineKeyboardButton("Отмена", callback_data="cancel_action")
@@ -134,7 +150,6 @@ class CommandHandlerManager:
 
     @staticmethod
     async def report(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Запускает диалог создания отчета."""
         user_info = db.get_user(update.effective_user.id)
         if not user_info: return
 
@@ -144,7 +159,6 @@ class CommandHandlerManager:
 
     @staticmethod
     async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Отправляет справочное сообщение."""
         user_id = update.effective_user.id
         user_info = db.get_user(user_id)
         
@@ -170,5 +184,4 @@ class CommandHandlerManager:
         else:
             help_text += "Ваш аккаунт не зарегистрирован. Пожалуйста, обратитесь к администратору."
         
-        # Отправляем сообщение в чат, а не в ответ на callback, если это возможно
         await context.bot.send_message(chat_id=user_id, text=help_text, parse_mode='Markdown')

@@ -1,15 +1,18 @@
 # Файл: report_generator.py
+# Этот модуль отвечает за генерацию текстовых представлений для всех видов отчетов.
+
 import datetime
 from typing import List
 import database as db
 from utils import seconds_to_str, get_now
+from config import LOCAL_TZ
 
 class ReportGenerator:
     """Класс, отвечающий за генерацию текстов для отчетов."""
 
     @staticmethod
     async def get_team_status_text(manager_id: int) -> str:
-        """Генерирует текст статуса команды для руководителя."""
+        """Генерирует текст статуса команды для руководителя с временем начала/окончания работы."""
         team_members = db.get_managed_users(manager_id)
         if not team_members:
             return "За вами не закреплено ни одного сотрудника."
@@ -24,14 +27,15 @@ class ReportGenerator:
             
             if session and session.get('status'):
                 status = session['status']
-                start_time = session['start_time']
+                start_time = session['start_time'] # Это время уже в нашей таймзоне
+                
                 if status == 'working':
-                    status_lines.append(f"🟢 {member_name}: Работает с {start_time.strftime('%H:%M')}")
+                    status_lines.append(f"🟢 {member_name}: Работает (начал в {start_time.strftime('%H:%M')})")
                 elif status == 'on_break':
                     break_start = session.get('break_start_time')
-                    status_lines.append(f"☕️ {member_name}: На перерыве с {break_start.strftime('%H:%M')}")
+                    status_lines.append(f"☕️ {member_name}: На перерыве (начал в {start_time.strftime('%H:%M')})")
                 else:
-                    status_lines.append(f"⚙️ {member_name}: Доп. работа с {start_time.strftime('%H:%M')}")
+                    status_lines.append(f"⚙️ {member_name}: Доп. работа (начал в {start_time.strftime('%H:%M')})")
             else:
                 absences = db.get_absences_for_user(member_id, today)
                 if absences:
@@ -39,7 +43,10 @@ class ReportGenerator:
                 else:
                     last_log = db.get_todays_work_log_for_user(member_id)
                     if last_log:
-                        status_lines.append(f"⚪️ {member_name}: Закончил работу в {last_log['end_time'].strftime('%H:%M')}")
+                        # Время из БД приходит с таймзоной UTC. Конвертируем его в нашу локальную.
+                        start_time_local = last_log['start_time'].astimezone(LOCAL_TZ)
+                        end_time_local = last_log['end_time'].astimezone(LOCAL_TZ)
+                        status_lines.append(f"⚪️ {member_name}: Не в сети (работал с {start_time_local.strftime('%H:%M')} до {end_time_local.strftime('%H:%M')})")
                     else:
                         status_lines.append(f"⚪️ {member_name}: Не в сети")
         
@@ -79,7 +86,8 @@ class ReportGenerator:
             member_name = member['full_name']
             
             logs = db.get_work_logs_for_user(member_id, str(start_date), str(end_date + datetime.timedelta(days=1)))
-            absences_list = db.get_absences_for_user(member_id, start_date) # Проверяем только начало периода
+            # Для отсутствий нужно проверять весь период, а не одну дату
+            absences_list = db.get_absences_for_user_in_period(member_id, start_date, end_date) # Предполагается, что такая функция будет создана в database.py
             
             employee_line = f"👤 **{member_name}**:"
             
@@ -98,3 +106,15 @@ class ReportGenerator:
             report_lines.append(employee_line)
 
         return "\n".join(report_lines)
+
+# Примечание: для get_manager_report_text может потребоваться добавить в database.py функцию
+# get_absences_for_user_in_period, которая ищет пересечения отсутствий с заданным диапазоном дат.
+# Пример такой функции:
+# def get_absences_for_user_in_period(user_id: int, start_date: datetime.date, end_date: datetime.date) -> List[Dict]:
+#     with db_connection() as conn:
+#         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+#             cursor.execute(
+#                 "SELECT * FROM absences WHERE user_id = %s AND start_date <= %s AND end_date >= %s",
+#                 (user_id, end_date, start_date)
+#             )
+#             return cursor.fetchall()
