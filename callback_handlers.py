@@ -443,4 +443,4 @@ class CallbackHandlerManager:
 
 
 # Создаем единственный экземпляр класса для импорта в bot.py
-callback_manager = CallbackHandlerManager()```
+callback_manager = CallbackHandlerManager()
