@@ -10,7 +10,7 @@ import database as db
 from config import CONFIG
 from menu_generator import MenuGenerator
 from report_generator import ReportGenerator
-from utils import get_now, end_workday_logic, seconds_to_str
+from utils import get_now, end_workday_logic, seconds_to_str, start_work_logic
 
 logger = logging.getLogger(__name__)
 
@@ -113,9 +113,8 @@ class CallbackHandlerManager:
                     )
             
             back_callback = "back_to_main_menu"
-            if session_state:
-                if session_state.get('status') in ['working', 'on_break']:
-                    back_callback = "back_to_working_menu"
+            if session_state and session_state.get('status') in ['working', 'on_break']:
+                back_callback = "back_to_working_menu"
 
             back_button = InlineKeyboardButton("« Назад", callback_data=back_callback)
             reply_markup = InlineKeyboardMarkup([[back_button]])
@@ -150,10 +149,9 @@ class CallbackHandlerManager:
             
             session_state = db.get_session_state(user_id)
             back_callback = "back_to_main_menu"
-            if session_state:
-                if session_state.get('status') in ['working', 'on_break']:
-                    back_callback = "back_to_working_menu"
-
+            if session_state and session_state.get('status') in ['working', 'on_break']:
+                back_callback = "back_to_working_menu"
+            
             back_button = InlineKeyboardButton("« Назад", callback_data=back_callback)
             reply_markup = InlineKeyboardMarkup([[back_button]])
             
@@ -168,22 +166,9 @@ class CallbackHandlerManager:
             logger.error(f"!!! КРИТИЧЕСКАЯ ОШИБКА внутри show_time_bank: {e}", exc_info=True)
 
     async def start_work_remote(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await self.start_work(update, update.callback_query.from_user.id, is_remote=True)
+        """Начинает удаленный рабочий день."""
+        await start_work_logic(update, context, update.callback_query.from_user.id, is_remote=True)
         
-    async def start_work(self, update: Update, user_id: int, is_remote: bool):
-        if db.get_session_state(user_id):
-            await update.effective_message.reply_text("Вы не можете начать новый день, пока не завершите текущую сессию.")
-            return
-
-        new_state = {'status': 'working', 'start_time': get_now(), 'total_break_seconds': 0, 'is_remote': is_remote}
-        db.set_session_state(user_id, new_state)
-        
-        message_text = f"Рабочий день начат в {new_state['start_time'].strftime('%H:%M:%S')}."
-        if hasattr(update, 'callback_query') and update.callback_query:
-            await update.callback_query.edit_message_text(text=message_text, reply_markup=MenuGenerator.get_working_menu())
-        else:
-            await update.effective_message.reply_text(text=message_text, reply_markup=MenuGenerator.get_working_menu())
-
     async def end_work(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         user_id = query.from_user.id

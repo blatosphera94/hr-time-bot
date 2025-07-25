@@ -80,3 +80,22 @@ async def end_workday_logic(context: ContextTypes.DEFAULT_TYPE, user_id: int, is
     
     main_menu_markup = await MenuGenerator.get_main_menu(user_id)
     await context.bot.send_message(user_id, message_text, reply_markup=main_menu_markup, parse_mode='Markdown')
+
+   
+    # Геолокация
+async def start_work_logic(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int, is_remote: bool):
+    """Универсальная логика для начала рабочего дня."""
+    from menu_generator import MenuGenerator # Локальный импорт для избежания циклов
+
+    if db.get_session_state(user_id):
+        await update.effective_message.reply_text("Вы не можете начать новый день, пока не завершите текущую сессию.")
+        return
+
+    new_state = {'status': 'working', 'start_time': get_now(), 'total_break_seconds': 0, 'is_remote': is_remote}
+    db.set_session_state(user_id, new_state)
+    
+    message_text = f"Рабочий день начат в {new_state['start_time'].strftime('%H:%M:%S')}."
+    if hasattr(update, 'callback_query') and update.callback_query:
+        await update.callback_query.edit_message_text(text=message_text, reply_markup=MenuGenerator.get_working_menu())
+    else:
+        await update.effective_message.reply_text(text=message_text, reply_markup=MenuGenerator.get_working_menu())  

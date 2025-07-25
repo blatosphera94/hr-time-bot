@@ -132,21 +132,30 @@ async def process_report_dates(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text("Неверный формат. Попробуйте еще раз или введите /cancel")
         return GET_REPORT_DATES
 
+# В файле conversation_handlers.py
+
 async def ask_for_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Запрашивает геолокацию с подробной инструкцией для ПК."""
     query = update.callback_query
     await query.answer()
+    
     keyboard = [[KeyboardButton("📍 Отправить мою геолокацию", request_location=True)]]
     
     message_text = (
         "Для начала работы в офисе, пожалуйста, подтвердите ваше местоположение.\n\n"
-        "Нажмите на кнопку ниже, или, если вы используете Telegram на компьютере, "
-        "прикрепите геолокацию вручную (📎 -> Геолокация)."
+        "📱 **На телефоне:**\n"
+        "Просто нажмите на кнопку ниже.\n\n"
+        "💻 **На компьютере (Windows/Mac/Linux):**\n"
+        "1. Нажмите на значок скрепки (📎).\n"
+        "2. Выберите 'Геолокация' (Location).\n"
+        "3. В открывшемся окне с картой нажмите 'ОТПРАВИТЬ ЭТУ ГЕОПОЗИЦИЮ'."
     )
     
     await context.bot.send_message(
         chat_id=query.from_user.id,
         text=message_text,
-        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True),
+        parse_mode='Markdown'
     )
     await query.delete_message()
     return GET_LOCATION
@@ -186,8 +195,9 @@ async def process_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     logger.info(f"Рассчитанное расстояние: {distance_m:.2f} метров. Разрешенный радиус: {CONFIG.OFFICE_RADIUS_METERS} м.")
 
     if distance_m <= CONFIG.OFFICE_RADIUS_METERS:
-        from callback_handlers import callback_manager
-        await callback_manager.start_work(update, user.id, is_remote=False)
+       python
+    from utils import start_work_logic
+    await start_work_logic(update, context, user.id, is_remote=False)
     else:
         await update.message.reply_text(
             f"Вы находитесь слишком далеко от офиса ({int(distance_m)} м). Пожалуйста, подойдите ближе.",
