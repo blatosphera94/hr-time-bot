@@ -22,7 +22,7 @@ class BotConfig:
     # --- Настройки геолокации офиса ---
     OFFICE_LATITUDE: float = 53.356422
     OFFICE_LONGITUDE: float = 83.771422
-    OFFICE_RADIUS_METERS: int = 200
+    OFFICE_RADIUS_METERS: int = 1500
 
     # --- Настройки логирования ---
     LOG_LEVEL: str = 'INFO'
