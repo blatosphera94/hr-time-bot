@@ -8,10 +8,9 @@ from config import CONFIG
 from menu_generator import MenuGenerator
 from report_generator import ReportGenerator
 from command_handlers import CommandHandlerManager
+from constants import GET_DATES_TEXT, GET_REPORT_DATES, GET_LOCATION, GET_USERS_FILE
 
 logger = logging.getLogger(__name__)
-
-GET_DATES_TEXT, GET_REPORT_DATES, GET_LOCATION, GET_USERS_FILE = range(4)
 
 async def ask_for_dates_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query

@@ -8,8 +8,7 @@ from utils import admin_only, get_now
 from menu_generator import MenuGenerator
 from config import CONFIG
 
-# Импортируем только то, что нужно для аннотации типов
-from conversation_handlers import GET_USERS_FILE 
+
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +90,7 @@ class CommandHandlerManager:
     @staticmethod
     @admin_only
     async def upload_users_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        from contants import GET_USERS_FILE
         await update.message.reply_text(
             "Пожалуйста, отправьте мне файл в формате .csv для добавления пользователей.\n\n"
             "Формат файла: `telegram_id,full_name,role,manager_id_1,manager_id_2`\n"
