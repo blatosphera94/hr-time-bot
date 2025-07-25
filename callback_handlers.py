@@ -77,31 +77,61 @@ class CallbackHandlerManager:
 
     # --- МЕТОДЫ-ОБРАБОТЧИКИ ---
 
-    async def show_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Показывает всплывающее уведомление с текущим статусом пользователя."""
-        query = update.callback_query
-        user_id = query.from_user.id
+# В файле callback_handlers.py
+
+async def show_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Редактирует текущее сообщение, чтобы показать текущий статус пользователя."""
+    query = update.callback_query
+    user_id = query.from_user.id
+    
+    logger.info(f"--- ЗАПУСК show_status (edit_message) для user_id: {user_id} ---")
+    
+    try:
         session_state = db.get_session_state(user_id)
         status_text = "Вы не в активной сессии."
+
         if session_state and session_state.get('status'):
             status = session_state['status']
             start_time = session_state['start_time']
+            
             if status == 'working':
                 work_duration = (get_now() - start_time).total_seconds()
                 break_duration = session_state.get('total_break_seconds', 0)
                 remaining_break = CONFIG.DAILY_BREAK_LIMIT_SECONDS - break_duration
-                status_text = (f"Статус: Работаете\n"
-                               f"Отработано сегодня: {seconds_to_str(work_duration - break_duration)}\n"
-                               f"Осталось перерыва: {seconds_to_str(remaining_break)}")
+                status_text = (
+                    f"**Статус: Работаете** 🟢\n\n"
+                    f"Отработано сегодня (чистое время): **{seconds_to_str(work_duration - break_duration)}**\n"
+                    f"Осталось перерыва на сегодня: **{seconds_to_str(remaining_break)}**"
+                )
             elif status == 'on_break':
                 break_start_time = session_state['break_start_time']
                 elapsed_break = (get_now() - break_start_time).total_seconds()
-                status_text = f"Статус: На перерыве\nДлительность: {seconds_to_str(elapsed_break)}"
+                status_text = (
+                    f"**Статус: На перерыве** ☕️\n\n"
+                    f"Текущий перерыв длится: **{seconds_to_str(elapsed_break)}**"
+                )
             elif status in ['clearing_debt', 'banking_time']:
                 elapsed_extra = (get_now() - start_time).total_seconds()
                 work_type_text = "Отработка долга" if status == 'clearing_debt' else "Работа в банк времени"
-                status_text = f"Статус: {work_type_text}\nПрошло времени: {seconds_to_str(elapsed_extra)}"
-        await query.answer(text=status_text, show_alert=True)
+                status_text = (
+                    f"**Статус: {work_type_text}** ⚙️\n\n"
+                    f"Прошло времени: **{seconds_to_str(elapsed_extra)}**"
+                )
+        
+        # Кнопка "Назад" всегда возвращает в рабочее меню, т.к. кнопка "Мое время" есть только там
+        back_button = InlineKeyboardButton("« Назад", callback_data="back_to_working_menu")
+        reply_markup = InlineKeyboardMarkup([[back_button]])
+
+        await query.edit_message_text(
+            text=status_text,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+        logger.info(f"--- УСПЕШНОЕ ЗАВЕРШЕНИЕ show_status (edit_message) для user_id: {user_id} ---")
+
+    except Exception as e:
+        logger.error(f"!!! КРИТИЧЕСКАЯ ОШИБКА внутри show_status: {e}", exc_info=True)
+        await query.answer("Произошла ошибка при получении статуса.", show_alert=True)
 
     async def show_time_bank(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Показывает всплывающее уведомление с состоянием банка времени (с логами для отладки)."""

@@ -1,4 +1,4 @@
-# Файл: conversation_handlers.py
+# Файл: conversation_handlers.py (Финальная, исправленная версия)
 import re
 import datetime
 import logging
@@ -18,7 +18,7 @@ from config import CONFIG
 from menu_generator import MenuGenerator
 from report_generator import ReportGenerator
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(_name_)
 
 # Состояния
 GET_DATES_TEXT, GET_REPORT_DATES, GET_LOCATION = range(3)
@@ -142,9 +142,15 @@ async def ask_for_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await query.answer()
     keyboard = [[KeyboardButton("📍 Отправить мою геолокацию", request_location=True)]]
     
+    message_text = (
+        "Для начала работы в офисе, пожалуйста, подтвердите ваше местоположение.\n\n"
+        "Нажмите на кнопку ниже, или, если вы используете Telegram на компьютере, "
+        "прикрепите геолокацию вручную (📎 -> Геолокация)."
+    )
+    
     await context.bot.send_message(
         chat_id=query.from_user.id,
-        text="Для начала работы в офисе, пожалуйста, подтвердите ваше местоположение, нажав на кнопку ниже.",
+        text=message_text,
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
     )
     await query.delete_message()
@@ -160,25 +166,43 @@ async def process_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await update.message.reply_text("Ошибка: Координаты офиса не настроены. Обратитесь к администратору.")
         return ConversationHandler.END
 
-    R = 6371.0
-    lat1, lon1 = radians(user_info['office_latitude']), radians(user_info['office_longitude'])
-    lat2, lon2 = radians(user_location.latitude), radians(user_location.longitude)
-    
-    dlon, dlat = lon2 - lon1, lat2 - lat1
-    a = sin(dlat / 2)**2 + cos(lat1) * cos(lat2) * sin(dlon / 2)**2
-    c = 2 * atan2(sqrt(a), sqrt(1 - a))
-    distance = R * c * 1000
+    office_lat = user_info['office_latitude']
+    office_lon = user_info['office_longitude']
+    user_lat = user_location.latitude
+    user_lon = user_location.longitude
 
-    if distance <= user_info.get('office_radius_meters', CONFIG.OFFICE_RADIUS_METERS):
+    logger.info(f"Проверка геолокации для user_id {user.id}:")
+    logger.info(f"Координаты офиса (из БД): Широта={office_lat}, Долгота={office_lon}")
+    logger.info(f"Координаты пользователя: Широта={user_lat}, Долгота={user_lon}")
+
+    # --- ИСПРАВЛЕННАЯ ФОРМУЛА РАСЧЕТА ---
+    R = 6371.0  # Радиус Земли в километрах
+    
+    lat1_rad, lon1_rad = radians(office_lat), radians(office_lon)
+    lat2_rad, lon2_rad = radians(user_lat), radians(user_lon)
+    
+    dlon = lon2_rad - lon1_rad
+    dlat = lat2_rad - lat1_rad
+    
+    a = sin(dlat / 2)*2 + cos(lat1_rad) * cos(lat2_rad) * sin(dlon / 2)*2
+    c = 2 * atan2(sqrt(a), sqrt(1 - a))
+    
+    distance_km = R * c
+    distance_m = distance_km * 1000 # Переводим в метры
+    # --- КОНЕЦ ИСПРАВЛЕННОЙ ФОРМУЛЫ ---
+    
+    logger.info(f"Рассчитанное расстояние: {distance_m:.2f} метров.")
+
+    if distance_m <= user_info.get('office_radius_meters', CONFIG.OFFICE_RADIUS_METERS):
         from callback_handlers import callback_manager
         await callback_manager.start_work(update, user.id, is_remote=False)
     else:
         await update.message.reply_text(
-            f"Вы находитесь слишком далеко от офиса ({int(distance)} м). Пожалуйста, подойдите ближе.",
+            f"Вы находитесь слишком далеко от офиса ({int(distance_m)} м). Пожалуйста, подойдите ближе.",
             reply_markup=await MenuGenerator.get_main_menu(user.id)
         )
     return ConversationHandler.END
-
+    
 # --- Общая функция отмены ---
 async def cancel_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
