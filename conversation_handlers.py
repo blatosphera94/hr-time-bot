@@ -18,7 +18,7 @@ from config import CONFIG
 from menu_generator import MenuGenerator
 from report_generator import ReportGenerator
 
-logger = logging.getLogger(_name_)
+logger = logging.getLogger(__name__)
 
 # Состояния
 GET_DATES_TEXT, GET_REPORT_DATES, GET_LOCATION = range(3)
@@ -202,7 +202,7 @@ async def process_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             reply_markup=await MenuGenerator.get_main_menu(user.id)
         )
     return ConversationHandler.END
-    
+
 # --- Общая функция отмены ---
 async def cancel_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
