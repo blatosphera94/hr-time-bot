@@ -1,4 +1,4 @@
-# Файл: conversation_handlers.py (Финальная, исправленная версия)
+# Файл: conversation_handlers.py (Финальная версия с исправлением логики радиуса)
 import re
 import datetime
 import logging
@@ -157,17 +157,17 @@ async def process_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await update.message.reply_text("Проверяем вашу геолокацию...", reply_markup=ReplyKeyboardRemove())
 
     user_info = db.get_user(user.id)
-    if not user_info or not all([user_info.get('office_latitude'), user_info.get('office_longitude')]):
-        await update.message.reply_text("Ошибка: Координаты офиса не настроены. Обратитесь к администратору.")
+    if not user_info:
+        await update.message.reply_text("Ошибка: Ваш профиль не найден. Пожалуйста, добавьте себя через /adduser.")
         return ConversationHandler.END
 
-    office_lat = user_info['office_latitude']
-    office_lon = user_info['office_longitude']
+    office_lat = CONFIG.OFFICE_LATITUDE
+    office_lon = CONFIG.OFFICE_LONGITUDE
     user_lat = user_location.latitude
     user_lon = user_location.longitude
 
     logger.info(f"Проверка геолокации для user_id {user.id}:")
-    logger.info(f"Координаты офиса (из БД): Широта={office_lat}, Долгота={office_lon}")
+    logger.info(f"Координаты офиса (из config.py): Широта={office_lat}, Долгота={office_lon}")
     logger.info(f"Координаты пользователя: Широта={user_lat}, Долгота={user_lon}")
 
     R = 6371.0
@@ -177,15 +177,15 @@ async def process_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     dlon = lon2_rad - lon1_rad
     dlat = lat2_rad - lat1_rad
     
-    a = sin(dlat / 2)**2 + cos(lat1_rad) * cos(lat2_rad) * sin(dlon / 2)**2
+    a = sin(dlat / 2)*2 + cos(lat1_rad) * cos(lat2_rad) * sin(dlon / 2)*2
     c = 2 * atan2(sqrt(a), sqrt(1 - a))
     
     distance_km = R * c
     distance_m = distance_km * 1000
     
-    logger.info(f"Рассчитанное расстояние: {distance_m:.2f} метров.")
+    logger.info(f"Рассчитанное расстояние: {distance_m:.2f} метров. Разрешенный радиус: {CONFIG.OFFICE_RADIUS_METERS} м.")
 
-    if distance_m <= user_info.get('office_radius_meters', CONFIG.OFFICE_RADIUS_METERS):
+    if distance_m <= CONFIG.OFFICE_RADIUS_METERS:
         from callback_handlers import callback_manager
         await callback_manager.start_work(update, user.id, is_remote=False)
     else:
