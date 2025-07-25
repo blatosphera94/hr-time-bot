@@ -1,7 +1,8 @@
-# Файл: conversation_handlers.py (Финальная версия с исправлением логики радиуса)
 import re
 import datetime
 import logging
+import csv
+import io
 from math import radians, sin, cos, sqrt, atan2
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from telegram.ext import (
@@ -17,13 +18,12 @@ import database as db
 from config import CONFIG
 from menu_generator import MenuGenerator
 from report_generator import ReportGenerator
+from command_handlers import CommandHandlerManager
 
 logger = logging.getLogger(__name__)
 
-# Состояния
-GET_DATES_TEXT, GET_REPORT_DATES, GET_LOCATION = range(3)
+GET_DATES_TEXT, GET_REPORT_DATES, GET_LOCATION, GET_USERS_FILE = range(4)
 
-# --- Диалог оформления отсутствий ---
 async def ask_for_dates_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
@@ -132,13 +132,9 @@ async def process_report_dates(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text("Неверный формат. Попробуйте еще раз или введите /cancel")
         return GET_REPORT_DATES
 
-# В файле conversation_handlers.py
-
 async def ask_for_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Запрашивает геолокацию с подробной инструкцией для ПК."""
     query = update.callback_query
     await query.answer()
-    
     keyboard = [[KeyboardButton("📍 Отправить мою геолокацию", request_location=True)]]
     
     message_text = (
@@ -166,17 +162,17 @@ async def process_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await update.message.reply_text("Проверяем вашу геолокацию...", reply_markup=ReplyKeyboardRemove())
 
     user_info = db.get_user(user.id)
-    if not user_info:
-        await update.message.reply_text("Ошибка: Ваш профиль не найден. Пожалуйста, добавьте себя через /adduser.")
+    if not user_info or not all([user_info.get('office_latitude'), user_info.get('office_longitude')]):
+        await update.message.reply_text("Ошибка: Координаты офиса не настроены. Обратитесь к администратору.")
         return ConversationHandler.END
 
-    office_lat = CONFIG.OFFICE_LATITUDE
-    office_lon = CONFIG.OFFICE_LONGITUDE
+    office_lat = user_info['office_latitude']
+    office_lon = user_info['office_longitude']
     user_lat = user_location.latitude
     user_lon = user_location.longitude
 
     logger.info(f"Проверка геолокации для user_id {user.id}:")
-    logger.info(f"Координаты офиса (из config.py): Широта={office_lat}, Долгота={office_lon}")
+    logger.info(f"Координаты офиса (из БД): Широта={office_lat}, Долгота={office_lon}")
     logger.info(f"Координаты пользователя: Широта={user_lat}, Долгота={user_lon}")
 
     R = 6371.0
@@ -186,23 +182,73 @@ async def process_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     dlon = lon2_rad - lon1_rad
     dlat = lat2_rad - lat1_rad
     
-    a = sin(dlat / 2)*2 + cos(lat1_rad) * cos(lat2_rad) * sin(dlon / 2)*2
+    a = sin(dlat / 2)**2 + cos(lat1_rad) * cos(lat2_rad) * sin(dlon / 2)**2
     c = 2 * atan2(sqrt(a), sqrt(1 - a))
     
     distance_km = R * c
     distance_m = distance_km * 1000
     
-    logger.info(f"Рассчитанное расстояние: {distance_m:.2f} метров. Разрешенный радиус: {CONFIG.OFFICE_RADIUS_METERS} м.")
+    logger.info(f"Рассчитанное расстояние: {distance_m:.2f} метров.")
 
-    if distance_m <= CONFIG.OFFICE_RADIUS_METERS:
-       python
-    from utils import start_work_logic
-    await start_work_logic(update, context, user.id, is_remote=False)
+    if distance_m <= user_info.get('office_radius_meters', CONFIG.OFFICE_RADIUS_METERS):
+        from utils import start_work_logic
+        await start_work_logic(update, context, user.id, is_remote=False)
     else:
         await update.message.reply_text(
             f"Вы находитесь слишком далеко от офиса ({int(distance_m)} м). Пожалуйста, подойдите ближе.",
             reply_markup=await MenuGenerator.get_main_menu(user.id)
         )
+    return ConversationHandler.END
+
+async def process_users_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    document = update.message.document
+    if not document or not document.file_name.endswith('.csv'):
+        await update.message.reply_text("Это не похоже на CSV-файл. Пожалуйста, отправьте файл с расширением .csv или введите /cancel.")
+        return GET_USERS_FILE
+
+    await update.message.reply_text("Файл получен. Начинаю обработку...")
+    
+    file = await context.bot.get_file(document.file_id)
+    file_content_bytes = await file.download_as_bytearray()
+    file_content_string = file_content_bytes.decode('utf-8')
+    f = io.StringIO(file_content_string)
+    reader = csv.reader(f)
+    
+    success_count = 0
+    error_lines = []
+    
+    try:
+        next(reader)
+    except StopIteration:
+        await update.message.reply_text("Файл пустой. Отмена.")
+        return ConversationHandler.END
+
+    for i, row in enumerate(reader, start=2):
+        try:
+            if len(row) != 5:
+                error_lines.append(f"Строка {i}: неверное количество колонок (ожидается 5).")
+                continue
+
+            user_id = int(row[0].strip())
+            full_name = row[1].strip()
+            role = row[2].strip() if row[2].strip() else 'employee'
+            manager_1 = int(row[3].strip()) if row[3].strip() else None
+            manager_2 = int(row[4].strip()) if row[4].strip() else None
+
+            db.add_or_update_user(user_id, full_name, role, manager_1, manager_2)
+            success_count += 1
+
+        except ValueError:
+            error_lines.append(f"Строка {i}: ID пользователя или руководителя должен быть числом.")
+        except Exception as e:
+            error_lines.append(f"Строка {i}: Неизвестная ошибка - {e}")
+
+    report_text = f"✅ Обработка завершена.\nУспешно добавлено/обновлено: {success_count}\n\n"
+    if error_lines:
+        report_text += f"❌ Обнаружены ошибки ({len(error_lines)}):\n"
+        report_text += "\n".join(error_lines)
+        
+    await update.message.reply_text(report_text)
     return ConversationHandler.END
 
 async def cancel_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -242,5 +288,13 @@ location_conv_handler = ConversationHandler(
     entry_points=[CallbackQueryHandler(ask_for_location, pattern='^start_work_office_location$')],
     states={GET_LOCATION: [MessageHandler(filters.LOCATION, process_location)]},
     fallbacks=[CallbackQueryHandler(cancel_conversation, pattern='^cancel_action$'), CommandHandler('cancel', cancel_conversation)],
+    per_message=False
+)
+upload_users_conv_handler = ConversationHandler(
+    entry_points=[CommandHandler('upload_users', CommandHandlerManager.upload_users_start)],
+    states={
+        GET_USERS_FILE: [MessageHandler(filters.Document.CSV, process_users_file)]
+    },
+    fallbacks=[CommandHandler('cancel', cancel_conversation)],
     per_message=False
 )
