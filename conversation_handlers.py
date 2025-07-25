@@ -58,7 +58,6 @@ async def process_dates_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await update.message.reply_text("Ошибка: не удалось найти ваш профиль.")
             return ConversationHandler.END
 
-        # Логика для запросов, требующих одобрения
         if absence_type_key in ['request_remote_work', 'request_day_off']:
             if not user_info.get('manager_id_1') and not user_info.get('manager_id_2'):
                 await update.message.reply_text("Ошибка: за вами не закреплен руководитель для согласования.", reply_markup=await MenuGenerator.get_main_menu(user.id))
@@ -80,8 +79,6 @@ async def process_dates_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 msg_ids['msg2_id'] = msg.message_id
             db.update_request_messages(request_id, **msg_ids)
             await update.message.reply_text(f"Ваш запрос на '{absence_name}' отправлен на согласование.", reply_markup=await MenuGenerator.get_main_menu(user.id))
-
-        # Логика для уведомлений
         else:
             db.add_absence(user.id, absence_name, start_date, end_date)
             await update.message.reply_text(f"{absence_name} с {start_date.strftime('%d.%m.%Y')} по {end_date.strftime('%d.%m.%Y')} успешно зарегистрирован.", reply_markup=await MenuGenerator.get_main_menu(user.id))
@@ -98,7 +95,6 @@ async def process_dates_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("Неверный формат даты. Попробуйте еще раз (ДД.ММ.ГГГГ) или введите /cancel.")
         return GET_DATES_TEXT
 
-# --- Диалог кастомного отчета ---
 async def ask_for_report_dates(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
@@ -136,7 +132,6 @@ async def process_report_dates(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text("Неверный формат. Попробуйте еще раз или введите /cancel")
         return GET_REPORT_DATES
 
-# --- Диалог проверки геолокации ---
 async def ask_for_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
@@ -175,21 +170,18 @@ async def process_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     logger.info(f"Координаты офиса (из БД): Широта={office_lat}, Долгота={office_lon}")
     logger.info(f"Координаты пользователя: Широта={user_lat}, Долгота={user_lon}")
 
-    # --- ИСПРАВЛЕННАЯ ФОРМУЛА РАСЧЕТА ---
-    R = 6371.0  # Радиус Земли в километрах
-    
+    R = 6371.0
     lat1_rad, lon1_rad = radians(office_lat), radians(office_lon)
     lat2_rad, lon2_rad = radians(user_lat), radians(user_lon)
     
     dlon = lon2_rad - lon1_rad
     dlat = lat2_rad - lat1_rad
     
-    a = sin(dlat / 2)*2 + cos(lat1_rad) * cos(lat2_rad) * sin(dlon / 2)*2
+    a = sin(dlat / 2)**2 + cos(lat1_rad) * cos(lat2_rad) * sin(dlon / 2)**2
     c = 2 * atan2(sqrt(a), sqrt(1 - a))
     
     distance_km = R * c
-    distance_m = distance_km * 1000 # Переводим в метры
-    # --- КОНЕЦ ИСПРАВЛЕННОЙ ФОРМУЛЫ ---
+    distance_m = distance_km * 1000
     
     logger.info(f"Рассчитанное расстояние: {distance_m:.2f} метров.")
 
@@ -203,7 +195,6 @@ async def process_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
     return ConversationHandler.END
 
-# --- Общая функция отмены ---
 async def cancel_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
     text = "Действие отменено."
@@ -225,10 +216,8 @@ async def cancel_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE
     context.user_data.clear()
     return ConversationHandler.END
 
-# --- СОЗДАНИЕ ЭКЗЕМПЛЯРОВ ХЕНДЛЕРОВ ---
-
 absence_conv_handler = ConversationHandler(
-    entry_points=[CallbackQueryHandler(ask_for_dates_text, pattern='^(request_remote_work|absence_sick|absence_vacation|absence_trip|request_day_off)$')],
+    entry_points=[CallbackQueryHandler(ask_for_dates_text, pattern='^(request_remote_work|absence_sick|absence_vacation|absence_trip|request_day_off|absence_sick_child)$')],
     states={GET_DATES_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_dates_text)]},
     fallbacks=[CommandHandler('cancel', cancel_conversation)],
     per_message=False

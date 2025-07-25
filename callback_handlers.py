@@ -23,16 +23,13 @@ class CallbackHandlerManager:
     async def main_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """
         Главный маршрутизатор для всех callback-запросов.
-        Он получает callback_data от кнопки и вызывает соответствующий метод этого класса.
         """
         query = update.callback_query
-        # Немедленно отвечаем на callback, чтобы пользователь не видел "часики" у кнопки.
         await query.answer()
         
         user_id = query.from_user.id
         command = query.data
 
-        # Словарь-маршрутизатор для статичных команд (без параметров в callback_data)
         routes = {
             'show_status': self.show_status,
             'show_time_bank': self.show_time_bank,
@@ -63,7 +60,6 @@ class CallbackHandlerManager:
 
         if handler_method:
             await handler_method(update, context)
-        # Обработка динамических callback'ов с параметрами
         elif command.startswith(('approve_', 'deny_', 'approve_no_debt_', 'ack_request_')):
             await self.process_manager_decision(update, context)
         elif command.startswith('user_details_'):
@@ -77,100 +73,104 @@ class CallbackHandlerManager:
 
     # --- МЕТОДЫ-ОБРАБОТЧИКИ ---
 
-# В файле callback_handlers.py
-
-async def show_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Редактирует текущее сообщение, чтобы показать текущий статус пользователя."""
-    query = update.callback_query
-    user_id = query.from_user.id
-    
-    logger.info(f"--- ЗАПУСК show_status (edit_message) для user_id: {user_id} ---")
-    
-    try:
-        session_state = db.get_session_state(user_id)
-        status_text = "Вы не в активной сессии."
-
-        if session_state and session_state.get('status'):
-            status = session_state['status']
-            start_time = session_state['start_time']
-            
-            if status == 'working':
-                work_duration = (get_now() - start_time).total_seconds()
-                break_duration = session_state.get('total_break_seconds', 0)
-                remaining_break = CONFIG.DAILY_BREAK_LIMIT_SECONDS - break_duration
-                status_text = (
-                    f"**Статус: Работаете** 🟢\n\n"
-                    f"Отработано сегодня (чистое время): **{seconds_to_str(work_duration - break_duration)}**\n"
-                    f"Осталось перерыва на сегодня: **{seconds_to_str(remaining_break)}**"
-                )
-            elif status == 'on_break':
-                break_start_time = session_state['break_start_time']
-                elapsed_break = (get_now() - break_start_time).total_seconds()
-                status_text = (
-                    f"**Статус: На перерыве** ☕️\n\n"
-                    f"Текущий перерыв длится: **{seconds_to_str(elapsed_break)}**"
-                )
-            elif status in ['clearing_debt', 'banking_time']:
-                elapsed_extra = (get_now() - start_time).total_seconds()
-                work_type_text = "Отработка долга" if status == 'clearing_debt' else "Работа в банк времени"
-                status_text = (
-                    f"**Статус: {work_type_text}** ⚙️\n\n"
-                    f"Прошло времени: **{seconds_to_str(elapsed_extra)}**"
-                )
-        
-        # Кнопка "Назад" всегда возвращает в рабочее меню, т.к. кнопка "Мое время" есть только там
-        back_button = InlineKeyboardButton("« Назад", callback_data="back_to_working_menu")
-        reply_markup = InlineKeyboardMarkup([[back_button]])
-
-        await query.edit_message_text(
-            text=status_text,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-        logger.info(f"--- УСПЕШНОЕ ЗАВЕРШЕНИЕ show_status (edit_message) для user_id: {user_id} ---")
-
-    except Exception as e:
-        logger.error(f"!!! КРИТИЧЕСКАЯ ОШИБКА внутри show_status: {e}", exc_info=True)
-        await query.answer("Произошла ошибка при получении статуса.", show_alert=True)
-
-    async def show_time_bank(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Показывает всплывающее уведомление с состоянием банка времени (с логами для отладки)."""
+    async def show_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Редактирует текущее сообщение, чтобы показать текущий статус пользователя."""
         query = update.callback_query
         user_id = query.from_user.id
         
-        logger.info(f"--- ЗАПУСК show_time_bank для user_id: {user_id} ---")
+        logger.info(f"--- ЗАПУСК show_status (edit_message) для user_id: {user_id} ---")
+        
+        try:
+            session_state = db.get_session_state(user_id)
+            status_text = "Вы не в активной сессии."
+
+            if session_state and session_state.get('status'):
+                status = session_state['status']
+                start_time = session_state['start_time']
+                
+                if status == 'working':
+                    work_duration = (get_now() - start_time).total_seconds()
+                    break_duration = session_state.get('total_break_seconds', 0)
+                    remaining_break = CONFIG.DAILY_BREAK_LIMIT_SECONDS - break_duration
+                    status_text = (
+                        f"**Статус: Работаете** 🟢\n\n"
+                        f"Отработано сегодня (чистое время): **{seconds_to_str(work_duration - break_duration)}**\n"
+                        f"Осталось перерыва на сегодня: **{seconds_to_str(remaining_break)}**"
+                    )
+                elif status == 'on_break':
+                    break_start_time = session_state['break_start_time']
+                    elapsed_break = (get_now() - break_start_time).total_seconds()
+                    status_text = (
+                        f"**Статус: На перерыве** ☕️\n\n"
+                        f"Текущий перерыв длится: **{seconds_to_str(elapsed_break)}**"
+                    )
+                elif status in ['clearing_debt', 'banking_time']:
+                    elapsed_extra = (get_now() - start_time).total_seconds()
+                    work_type_text = "Отработка долга" if status == 'clearing_debt' else "Работа в банк времени"
+                    status_text = (
+                        f"**Статус: {work_type_text}** ⚙️\n\n"
+                        f"Прошло времени: **{seconds_to_str(elapsed_extra)}**"
+                    )
+            
+            back_callback = "back_to_main_menu"
+            if session_state:
+                if session_state.get('status') in ['working', 'on_break']:
+                    back_callback = "back_to_working_menu"
+
+            back_button = InlineKeyboardButton("« Назад", callback_data=back_callback)
+            reply_markup = InlineKeyboardMarkup([[back_button]])
+
+            await query.edit_message_text(
+                text=status_text,
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+            logger.info(f"--- УСПЕШНОЕ ЗАВЕРШЕНИЕ show_status (edit_message) для user_id: {user_id} ---")
+
+        except Exception as e:
+            logger.error(f"!!! КРИТИЧЕСКАЯ ОШИБКА внутри show_status: {e}", exc_info=True)
+            await query.answer("Произошла ошибка при получении статуса.", show_alert=True)
+            
+    async def show_time_bank(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Редактирует текущее сообщение, чтобы показать баланс банка времени."""
+        query = update.callback_query
+        user_id = query.from_user.id
+        
+        logger.info(f"--- ЗАПУСК show_time_bank (edit_message) для user_id: {user_id} ---")
         
         try:
             user_info = db.get_user(user_id)
-            logger.info(f"Результат db.get_user: {user_info}")
-
-            if user_info:
-                banked_seconds = user_info.get('time_bank_seconds', 0)
-                logger.info(f"Пользователь найден. Банк времени: {banked_seconds} секунд.")
-            else:
-                banked_seconds = 0
+            if not user_info:
                 logger.warning(f"Пользователь с ID {user_id} НЕ НАЙДЕН в базе данных.")
+                await query.answer("Не удалось найти ваш профиль.", show_alert=True)
+                return
 
-            message_text = f"🏦 В вашем банке времени накоплено: {seconds_to_str(banked_seconds)}"
-            logger.info(f"Подготовлен текст для ответа: '{message_text}'")
+            banked_seconds = user_info.get('time_bank_seconds', 0)
+            message_text = f"🏦 В вашем банке времени накоплено: **{seconds_to_str(banked_seconds)}**."
+            
+            session_state = db.get_session_state(user_id)
+            back_callback = "back_to_main_menu"
+            if session_state:
+                if session_state.get('status') in ['working', 'on_break']:
+                    back_callback = "back_to_working_menu"
 
-            await query.answer(
+            back_button = InlineKeyboardButton("« Назад", callback_data=back_callback)
+            reply_markup = InlineKeyboardMarkup([[back_button]])
+            
+            await query.edit_message_text(
                 text=message_text,
-                show_alert=True
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
             )
-            logger.info(f"--- УСПЕШНОЕ ЗАВЕРШЕНИЕ show_time_bank для user_id: {user_id} ---")
+            logger.info(f"--- УСПЕШНОЕ ЗАВЕРШЕНИЕ show_time_bank (edit_message) для user_id: {user_id} ---")
             
         except Exception as e:
             logger.error(f"!!! КРИТИЧЕСКАЯ ОШИБКА внутри show_time_bank: {e}", exc_info=True)
 
-    # --- Логика рабочего дня ---
-
     async def start_work_remote(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Начинает удаленный рабочий день."""
         await self.start_work(update, update.callback_query.from_user.id, is_remote=True)
         
     async def start_work(self, update: Update, user_id: int, is_remote: bool):
-        """Универсальная функция для начала работы (удаленно или после проверки геолокации)."""
         if db.get_session_state(user_id):
             await update.effective_message.reply_text("Вы не можете начать новый день, пока не завершите текущую сессию.")
             return
@@ -185,7 +185,6 @@ async def show_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.effective_message.reply_text(text=message_text, reply_markup=MenuGenerator.get_working_menu())
 
     async def end_work(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Завершает рабочий день или предлагает варианты, если время не выработано."""
         query = update.callback_query
         user_id = query.from_user.id
         session_state = db.get_session_state(user_id)
@@ -199,7 +198,6 @@ async def show_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
             await end_workday_logic(context, user_id)
 
     async def start_break(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Обрабатывает начало перерыва."""
         query = update.callback_query
         user_id = query.from_user.id
         session_state = db.get_session_state(user_id)
@@ -223,7 +221,6 @@ async def show_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     async def end_break(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Завершает перерыв и возвращает в рабочий режим."""
         query = update.callback_query
         user_id = query.from_user.id
         session_state = db.get_session_state(user_id)
@@ -238,7 +235,6 @@ async def show_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text=f"Вы вернулись к работе. У вас осталось {remaining_break_str} перерыва.", reply_markup=MenuGenerator.get_working_menu())
 
     async def end_work_use_bank(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Завершает рабочий день, списывая недостающее время из банка времени."""
         query = update.callback_query
         user_id = query.from_user.id
         user_info = db.get_user(user_id)
@@ -258,7 +254,6 @@ async def show_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer(f"Недостаточно времени в банке. Нужно еще: {needed_str}", show_alert=True)
             
     async def end_work_ask_manager(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Отправляет запрос руководителю на раннее завершение дня."""
         query = update.callback_query
         user_id = query.from_user.id
         user_info = db.get_user(user_id)
@@ -285,8 +280,6 @@ async def show_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
             msg_ids['msg2_id'] = msg.message_id
         db.update_request_messages(request_id, **msg_ids)
 
-    # --- Навигация по меню ---
-    
     async def absence_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.callback_query.edit_message_text("Выберите тип отсутствия:", reply_markup=MenuGenerator.get_absence_menu())
     
@@ -304,8 +297,6 @@ async def show_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
     async def cancel_action(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.callback_query.edit_message_text("Действие отменено.")
 
-    # --- Отчеты и помощь ---
-    
     async def request_report(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         user_id = query.from_user.id
@@ -326,8 +317,6 @@ async def show_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         from command_handlers import CommandHandlerManager
         await CommandHandlerManager.help_command(update, context)
 
-    # --- Логика администратора/менеджера ---
-    
     async def process_manager_decision(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         user_id = query.from_user.id
@@ -408,7 +397,7 @@ async def show_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if 'today' in command:
             start_date, end_date = today, today
-        else: # this_month
+        else:
             start_date = today.replace(day=1)
             next_month = start_date.replace(day=28) + datetime.timedelta(days=4)
             end_date = next_month - datetime.timedelta(days=next_month.day)
@@ -424,8 +413,6 @@ async def show_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
             
         await context.bot.send_message(user_id, report_text, parse_mode='Markdown', reply_markup=reply_markup)
         
-    # --- Дополнительная работа ---
-    
     async def additional_work_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         await query.edit_message_text("Выберите тип дополнительной работы:", reply_markup=MenuGenerator.get_additional_work_menu(query.from_user.id))
@@ -489,6 +476,4 @@ async def show_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.delete_session_state(user_id)
         await query.edit_message_text(text, reply_markup=await MenuGenerator.get_main_menu(user_id))
 
-
-# Создаем единственный экземпляр класса для импорта в bot.py
 callback_manager = CallbackHandlerManager()
