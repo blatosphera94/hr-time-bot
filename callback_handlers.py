@@ -63,7 +63,7 @@ class CallbackHandlerManager:
 
         if handler_method:
             await handler_method(update, context)
-        # Обработка динамических callback'ов (с ID или другими параметрами)
+        # Обработка динамических callback'ов с параметрами
         elif command.startswith(('approve_', 'deny_', 'approve_no_debt_', 'ack_request_')):
             await self.process_manager_decision(update, context)
         elif command.startswith('user_details_'):
@@ -104,16 +104,34 @@ class CallbackHandlerManager:
         await query.answer(text=status_text, show_alert=True)
 
     async def show_time_bank(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Показывает всплывающее уведомление с состоянием банка времени."""
+        """Показывает всплывающее уведомление с состоянием банка времени (с логами для отладки)."""
         query = update.callback_query
         user_id = query.from_user.id
-        user_info = db.get_user(user_id)
-        banked_seconds = user_info.get('time_bank_seconds', 0) if user_info else 0
         
-        await query.answer(
-            text=f"🏦 В вашем банке времени накоплено: {seconds_to_str(banked_seconds)}",
-            show_alert=True
-        )
+        logger.info(f"--- ЗАПУСК show_time_bank для user_id: {user_id} ---")
+        
+        try:
+            user_info = db.get_user(user_id)
+            logger.info(f"Результат db.get_user: {user_info}")
+
+            if user_info:
+                banked_seconds = user_info.get('time_bank_seconds', 0)
+                logger.info(f"Пользователь найден. Банк времени: {banked_seconds} секунд.")
+            else:
+                banked_seconds = 0
+                logger.warning(f"Пользователь с ID {user_id} НЕ НАЙДЕН в базе данных.")
+
+            message_text = f"🏦 В вашем банке времени накоплено: {seconds_to_str(banked_seconds)}"
+            logger.info(f"Подготовлен текст для ответа: '{message_text}'")
+
+            await query.answer(
+                text=message_text,
+                show_alert=True
+            )
+            logger.info(f"--- УСПЕШНОЕ ЗАВЕРШЕНИЕ show_time_bank для user_id: {user_id} ---")
+            
+        except Exception as e:
+            logger.error(f"!!! КРИТИЧЕСКАЯ ОШИБКА внутри show_time_bank: {e}", exc_info=True)
 
     # --- Логика рабочего дня ---
 
@@ -133,7 +151,7 @@ class CallbackHandlerManager:
         message_text = f"Рабочий день начат в {new_state['start_time'].strftime('%H:%M:%S')}."
         if hasattr(update, 'callback_query') and update.callback_query:
             await update.callback_query.edit_message_text(text=message_text, reply_markup=MenuGenerator.get_working_menu())
-        else: # Этот блок сработает после проверки геолокации, где нет callback_query
+        else:
             await update.effective_message.reply_text(text=message_text, reply_markup=MenuGenerator.get_working_menu())
 
     async def end_work(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
